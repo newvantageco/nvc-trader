@@ -16,7 +16,7 @@ from loguru import logger
 
 from core.ai.tools import TRADING_TOOLS
 from core.ai.prompts import TRADING_AGENT_SYSTEM_PROMPT
-from core.bridge.zmq_publisher import ZMQPublisher
+from core.bridge.oanda_client import OandaClient
 from core.risk.circuit_breaker import CircuitBreaker
 from core.risk.position_sizer import PositionSizer
 from core.ingestion.news_fetcher import NewsFetcher
@@ -41,7 +41,7 @@ class VantageAgent:
 
     def __init__(self) -> None:
         self.client = anthropic.Anthropic()
-        self.zmq = ZMQPublisher()
+        self.zmq = OandaClient()   # OANDA REST for cloud; swap to ZMQPublisher for MT5
         self.circuit_breaker = CircuitBreaker()
         self.position_sizer = PositionSizer()
         self.news_fetcher = NewsFetcher()

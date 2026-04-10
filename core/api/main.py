@@ -102,17 +102,17 @@ async def get_signals(limit: int = 50):
 
 @app.get("/positions")
 async def get_positions():
-    from core.bridge.zmq_publisher import ZMQPublisher
-    zmq = ZMQPublisher()
-    positions = await zmq.get_positions()
+    from core.bridge.oanda_client import OandaClient
+    client = OandaClient()
+    positions = await client.get_positions()
     return {"positions": positions}
 
 
 @app.get("/account")
 async def get_account():
-    from core.bridge.zmq_publisher import ZMQPublisher
-    zmq = ZMQPublisher()
-    metrics = await zmq.get_account_info()
+    from core.bridge.oanda_client import OandaClient
+    client = OandaClient()
+    metrics = await client.get_account_info()
     return metrics
 
 
