@@ -143,6 +143,103 @@ async def get_sentiment(instrument: str):
     return {"instrument": instrument, **agg}
 
 
+# ─── Analytics ────────────────────────────────────────────────────────────────
+
+@app.get("/analytics")
+async def get_analytics():
+    """Aggregated performance metrics from the trades table."""
+    trades = await db.select("trades")
+    closed = [t for t in trades if t.get("status") == "closed"]
+
+    if not closed:
+        return {
+            "total_trades": 0, "winning_trades": 0, "losing_trades": 0,
+            "win_rate": 0.0, "total_pnl": 0.0, "avg_win": 0.0,
+            "avg_loss": 0.0, "profit_factor": 0.0, "sharpe_ratio": 0.0,
+            "max_drawdown_pct": 0.0, "total_signals": len(await db.select("signals")),
+            "by_instrument": {},
+        }
+
+    winners = [t for t in closed if (t.get("pnl") or 0) > 0]
+    losers  = [t for t in closed if (t.get("pnl") or 0) <= 0]
+    gross_p = sum(t.get("pnl", 0) for t in winners)
+    gross_l = abs(sum(t.get("pnl", 0) for t in losers))
+
+    by_instrument: dict = {}
+    for t in closed:
+        sym = t.get("instrument", "")
+        if sym not in by_instrument:
+            by_instrument[sym] = {"trades": 0, "pnl": 0.0, "wins": 0}
+        by_instrument[sym]["trades"] += 1
+        by_instrument[sym]["pnl"]    += t.get("pnl", 0)
+        if (t.get("pnl") or 0) > 0:
+            by_instrument[sym]["wins"] += 1
+
+    by_instrument_out = {
+        k: {"trades": v["trades"], "pnl": round(v["pnl"], 2),
+            "win_rate": v["wins"] / v["trades"] if v["trades"] else 0}
+        for k, v in by_instrument.items()
+    }
+
+    signals = await db.select("signals")
+    return {
+        "total_trades":    len(closed),
+        "winning_trades":  len(winners),
+        "losing_trades":   len(losers),
+        "win_rate":        len(winners) / len(closed) if closed else 0,
+        "total_pnl":       round(sum(t.get("pnl", 0) for t in closed), 2),
+        "avg_win":         round(gross_p / len(winners), 2) if winners else 0,
+        "avg_loss":        round(gross_l / len(losers), 2) if losers else 0,
+        "profit_factor":   round(gross_p / gross_l, 3) if gross_l else 9.99,
+        "sharpe_ratio":    0.0,
+        "max_drawdown_pct": 0.0,
+        "total_signals":   len(signals),
+        "by_instrument":   by_instrument_out,
+    }
+
+
+@app.get("/portfolio")
+async def get_portfolio():
+    """Portfolio exposure report."""
+    from core.risk.portfolio_manager import PortfolioManager
+    from core.bridge.oanda_client import OandaClient
+    oanda    = OandaClient()
+    pm       = PortfolioManager()
+    account  = await oanda.get_account_info()
+    positions = await oanda.get_positions()
+    report   = pm.get_exposure_report(positions, account.get("equity", 10000))
+    return report
+
+
+@app.get("/scan")
+async def scan_markets():
+    """Run a live signal scan across the full watchlist."""
+    from core.signals.signal_generator import SignalGenerator
+    from core.ai.claude_agent import WATCHLIST
+    gen     = SignalGenerator()
+    results = await gen.scan_watchlist(WATCHLIST)
+    return {"signals": results, "count": len(results)}
+
+
+@app.post("/settings")
+async def save_settings(settings: dict):
+    """Persist risk settings to DB."""
+    await db.insert("settings", {"key": "risk_params", "value": settings,
+                                  "updated_at": datetime.now(timezone.utc).isoformat()})
+    return {"status": "saved"}
+
+
+@app.get("/settings")
+async def get_settings():
+    rows = await db.select("settings", {"key": "risk_params"})
+    if rows:
+        return rows[0].get("value", {})
+    return {
+        "max_risk_pct": 1.0, "max_daily_dd_pct": 3.0,
+        "signal_threshold": 0.60, "max_open_trades": 8,
+    }
+
+
 # ─── WebSocket ─────────────────────────────────────────────────────────────────
 
 @app.websocket("/ws")
