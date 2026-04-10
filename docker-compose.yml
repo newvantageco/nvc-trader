@@ -1,0 +1,33 @@
+version: '3.9'
+
+services:
+  # ─── NVC Core Engine (Python) ──────────────────────────────────────────────
+  core:
+    build:
+      context: .
+      dockerfile: Dockerfile.core
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+    volumes:
+      - ./core:/app/core
+    restart: unless-stopped
+    networks:
+      - nvc
+
+  # ─── Redis ─────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    networks:
+      - nvc
+
+networks:
+  nvc:
+    driver: bridge

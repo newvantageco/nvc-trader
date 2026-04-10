@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── NVC Terminal Design Tokens ─────────────────────────────────────────── */
+:root {
+  --bg-base:       #0a0e14;
+  --bg-surface:    #111827;
+  --bg-elevated:   #1a2235;
+  --bg-hover:      #1e2d42;
+
+  --border:        #1e293b;
+  --border-bright: #334155;
+
+  --text-primary:  #f1f5f9;
+  --text-secondary:#94a3b8;
+  --text-muted:    #475569;
+
+  --accent:        #f59e0b;   /* NVC amber */
+  --accent-dim:    #78350f;
+
+  --bull:          #10b981;   /* green */
+  --bear:          #ef4444;   /* red */
+  --neutral:       #64748b;
+
+  --font-mono:     'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+  --font-ui:       'Inter', system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.5;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--bg-base); }
+::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
+
+/* Monospace data cells */
+.mono { font-family: var(--font-mono); }
+
+/* Status dots */
+.dot-live  { @apply inline-block w-2 h-2 rounded-full bg-green-400 animate-pulse; }
+.dot-paused{ @apply inline-block w-2 h-2 rounded-full bg-amber-400; }
+.dot-stop  { @apply inline-block w-2 h-2 rounded-full bg-red-500; }
+
+/* Bull/Bear text */
+.bull { color: var(--bull); }
+.bear { color: var(--bear); }
+.neutral { color: var(--neutral); }
