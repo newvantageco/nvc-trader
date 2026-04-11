@@ -6,12 +6,16 @@ Exposes REST + WebSocket endpoints for the dashboard and external triggers.
 import asyncio
 import json
 import os
+import queue
+import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from typing import AsyncGenerator
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
 
@@ -92,6 +96,31 @@ async def trigger_agent(trigger: str = "manual"):
     result = await agent.run_cycle(trigger=f"manual:{trigger}")
     await ws_manager.broadcast({"type": "manual_cycle", "data": result})
     return result
+
+
+@app.get("/agent/stream")
+async def stream_agent(trigger: str = "manual-stream"):
+    """
+    Server-Sent Events stream of a live Claude agent cycle.
+    The dashboard Brain page connects here to watch Claude think in real-time.
+    """
+    async def event_generator() -> AsyncGenerator[str, None]:
+        from core.ai.streaming_agent import VantageStreamingAgent
+        streaming = VantageStreamingAgent()
+        async for event in streaming.run_streaming(trigger=trigger):
+            data = json.dumps(event, default=str)
+            yield f"data: {data}\n\n"
+        yield "data: {\"type\": \"done\"}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control":               "no-cache",
+            "X-Accel-Buffering":           "no",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
 
 
 @app.get("/signals")
