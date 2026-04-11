@@ -332,6 +332,65 @@ TRADING_TOOLS: list[dict[str, Any]] = [
     },
 
     {
+        "name": "get_market_regime",
+        "description": (
+            "Classify the current market regime for an instrument using ADX, EMA alignment, and ATR. "
+            "Returns: TRENDING_BULLISH, TRENDING_BEARISH, RANGING, VOLATILE, EXHAUSTED, or BREAKOUT. "
+            "CRITICAL: check regime before every trade. "
+            "Do NOT use trend-following entries in RANGING markets. "
+            "Do NOT trade VOLATILE or EXHAUSTED regimes — wait for structure. "
+            "BREAKOUT regime = enter immediately with momentum and tight initial stop."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "instrument": {
+                    "type": "string",
+                    "description": "Trading instrument symbol",
+                },
+                "ohlcv": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "OHLCV candle data. If not provided, will be fetched automatically.",
+                },
+            },
+            "required": ["instrument"],
+        },
+    },
+
+    {
+        "name": "check_edge_filter",
+        "description": (
+            "Run the 8-condition Edge Filter on a potential trade setup. "
+            "This is the final quality gate before execution — only A/A+/A++ setups should be traded. "
+            "Returns: grade (A++/A+/A/FAIL), score (0-8 conditions met), "
+            "recommended position size (fraction of max), recommended RR ratio, "
+            "and which specific conditions passed or failed. "
+            "Special setups detected: INSTITUTIONAL_DIVERGENCE (hedge funds vs retail opposite sides), "
+            "BREAKOUT, NEWS_AFTERMATH. These get bonus scoring. "
+            "NEVER execute a trade that scores FAIL on the edge filter — regardless of your confidence."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "instrument":   {"type": "string", "description": "Instrument symbol"},
+                "direction":    {"type": "string", "enum": ["BUY", "SELL"]},
+                "ta_score":     {"type": "number", "description": "Technical analysis score 0.0–1.0"},
+                "sentiment":    {"type": "object", "description": "Sentiment result from get_news_sentiment"},
+                "order_flow":   {"type": "object", "description": "Order flow result from get_order_flow"},
+                "macro":        {"type": "object", "description": "Macro result from get_macro_environment"},
+                "regime":       {"type": "object", "description": "Regime result from get_market_regime"},
+                "spread_pips":  {"type": "number", "description": "Current spread in pips (optional)"},
+                "news_event_minutes_ago": {
+                    "type": "number",
+                    "description": "Minutes since last high-impact news event (optional)",
+                },
+            },
+            "required": ["instrument", "direction", "ta_score", "sentiment", "order_flow", "macro", "regime"],
+        },
+    },
+
+    {
         "name": "get_execution_quality",
         "description": (
             "Get execution quality metrics: average slippage per instrument, "

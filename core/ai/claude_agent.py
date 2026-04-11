@@ -30,6 +30,8 @@ from core.ingestion.fred_client import FREDClient
 from core.ingestion.research_fetcher import ResearchFetcher
 from core.execution.smart_executor import SmartExecutor
 from core.planning.portfolio_optimizer import PortfolioOptimizer
+from core.analysis.regime_detector import RegimeDetector
+from core.signals.edge_filter import EdgeFilter
 
 
 WATCHLIST = [
@@ -61,6 +63,8 @@ class VantageAgent:
         self.research        = ResearchFetcher()
         self.smart_executor  = SmartExecutor()
         self.optimizer       = PortfolioOptimizer()
+        self.regime          = RegimeDetector()
+        self.edge_filter     = EdgeFilter()
         self._open_positions: list[dict] = []
         self._account_metrics: dict = {}
 
@@ -181,6 +185,10 @@ class VantageAgent:
                     return await self._tool_portfolio_analysis(**inputs)
                 case "get_execution_quality":
                     return await self._tool_execution_quality(**inputs)
+                case "get_market_regime":
+                    return await self._tool_market_regime(**inputs)
+                case "check_edge_filter":
+                    return self._tool_edge_filter(**inputs)
                 case _:
                     return {"error": f"Unknown tool: {name}"}
         except Exception as exc:
@@ -372,6 +380,61 @@ class VantageAgent:
                 f"50th percentile 30-day balance: ${mc['p50_balance']:,.0f} "
                 f"({mc['expected_return_pct']:+.1f}%) | "
                 f"Ruin probability: {mc['ruin_probability_pct']:.1f}%"
+            ),
+        }
+
+    async def _tool_market_regime(
+        self, instrument: str, ohlcv: list | None = None
+    ) -> dict:
+        if ohlcv is None:
+            try:
+                price_data = await self.ta_engine.get_price_data(instrument, "H1")
+                ohlcv = price_data.get("candles", [])
+            except Exception:
+                ohlcv = []
+        return await self.regime.detect(instrument, ohlcv)
+
+    def _tool_edge_filter(
+        self,
+        instrument:  str,
+        direction:   str,
+        ta_score:    float,
+        sentiment:   dict,
+        order_flow:  dict,
+        macro:       dict,
+        regime:      dict,
+        spread_pips: float | None = None,
+        news_event_minutes_ago: int | None = None,
+    ) -> dict:
+        result = self.edge_filter.evaluate(
+            instrument=instrument,
+            direction=direction,
+            ta_score=ta_score,
+            sentiment=sentiment,
+            order_flow=order_flow,
+            macro=macro,
+            regime=regime,
+            account={
+                "daily_drawdown_pct": self._account_metrics.get("daily_drawdown_pct", 0),
+                "open_positions":     len(self._open_positions),
+            },
+            spread_pips=spread_pips,
+            news_event_minutes_ago=news_event_minutes_ago,
+        )
+        return {
+            "passes":            result.passes,
+            "grade":             result.grade,
+            "score":             result.score,
+            "conditions":        result.conditions,
+            "recommended_size":  result.recommended_size,
+            "recommended_rr":    result.recommended_rr,
+            "special_setup":     result.special_setup,
+            "notes":             result.notes,
+            "verdict": (
+                f"{'✅ TRADE APPROVED' if result.passes else '❌ TRADE BLOCKED'} — "
+                f"Grade {result.grade} ({result.score}/8 conditions). "
+                + (f"Special: {result.special_setup}. " if result.special_setup else "")
+                + (f"Size: {result.recommended_size:.0%}, RR: {result.recommended_rr}:1" if result.passes else "")
             ),
         }
 

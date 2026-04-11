@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, TrendingUp, BarChart3, Settings, Activity, Brain } from 'lucide-react'
+import { LayoutDashboard, TrendingUp, BarChart3, Settings, Activity, Brain, ShieldCheck } from 'lucide-react'
 
 const NAV = [
   { href: '/',           label: 'Terminal',  icon: LayoutDashboard },
@@ -10,6 +10,7 @@ const NAV = [
   { href: '/markets',    label: 'Markets',   icon: TrendingUp },
   { href: '/analytics',  label: 'Analytics', icon: BarChart3 },
   { href: '/brain',      label: 'Brain',     icon: Brain },
+  { href: '/admin',      label: 'Admin',     icon: ShieldCheck },
   { href: '/settings',   label: 'Settings',  icon: Settings },
 ]
 

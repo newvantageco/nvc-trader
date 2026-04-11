@@ -250,6 +250,156 @@ async def scan_markets():
     return {"signals": results, "count": len(results)}
 
 
+@app.get("/admin/overview")
+async def admin_overview():
+    """
+    Admin dashboard: APY, true platform cost breakdown, profit margin,
+    growth stage, and operational health.
+    """
+    from core.risk.growth_plan import GrowthPlan, STAGES
+
+    # ── P&L history ──────────────────────────────────────────────────────────
+    trades    = await db.select("trades")
+    closed    = [t for t in trades if t.get("status") == "closed"]
+    cycles    = await db.select("agent_cycles")
+
+    # Build daily P&L from closed trades
+    daily_pnl: dict[str, float] = {}
+    for t in closed:
+        day = (t.get("closed_at") or t.get("created_at") or "")[:10]
+        if day:
+            daily_pnl[day] = daily_pnl.get(day, 0) + float(t.get("pnl") or 0)
+
+    history = [
+        {"date": d, "pnl": round(p, 2), "account_equity": 100.0}
+        for d, p in sorted(daily_pnl.items())
+    ]
+
+    # ── Account balance ───────────────────────────────────────────────────────
+    from core.bridge.oanda_client import OandaClient
+    oanda   = OandaClient()
+    account = await oanda.get_account_info()
+    balance = account.get("equity", 100.0)
+
+    # ── Growth plan ───────────────────────────────────────────────────────────
+    gp      = GrowthPlan()
+    stage   = gp.get_current_stage(history)
+    params  = gp.get_trading_params(stage, balance)
+    apy     = gp.compute_apy(history, balance)
+    advance = gp.check_stage_advancement(history)
+
+    # ── True cost model (monthly) ─────────────────────────────────────────────
+    # Cycle frequency: 56 cycles/day during trading hours × 30 days
+    cycles_per_month  = 1680
+    # Anthropic Claude Sonnet 4.6 pricing: $3/M input, $15/M output
+    input_tokens_m    = cycles_per_month * 6000 / 1_000_000   # 6k avg input
+    output_tokens_m   = cycles_per_month * 1500 / 1_000_000   # 1.5k avg output
+    anthropic_cost    = round(input_tokens_m * 3 + output_tokens_m * 15, 2)
+    fly_cost          = 61.00    # performance-2x machine
+    vercel_cost       = 0.00     # free tier
+    supabase_cost     = 0.00     # free tier
+    newsapi_cost      = 0.00     # free tier
+    fred_cost         = 0.00     # free
+    domain_cost       = 1.00     # ~$12/year
+
+    total_monthly_cost = round(anthropic_cost + fly_cost + vercel_cost +
+                               supabase_cost + newsapi_cost + fred_cost + domain_cost, 2)
+    daily_cost         = round(total_monthly_cost / 30, 2)
+
+    # ── Profit margin ─────────────────────────────────────────────────────────
+    avg_daily_gross = apy.get("avg_daily_usd", 0)
+    margin_pct      = 0.0
+    if avg_daily_gross > daily_cost:
+        margin_pct = round((avg_daily_gross - daily_cost) / avg_daily_gross * 100, 1)
+
+    # Monthly projection
+    monthly_gross = avg_daily_gross * 30
+    monthly_net   = round(monthly_gross - total_monthly_cost, 2)
+
+    # Break-even point
+    breakeven_daily = daily_cost
+    breakeven_monthly = total_monthly_cost
+
+    # Stage targets vs costs
+    stage_targets = []
+    for s in STAGES:
+        s_monthly_gross_min = s.daily_min * 30
+        s_monthly_gross_max = s.daily_max * 30
+        s_net_min           = round(s_monthly_gross_min - total_monthly_cost, 2)
+        s_net_max           = round(s_monthly_gross_max - total_monthly_cost, 2)
+        s_margin_min        = round(s_net_min / s_monthly_gross_min * 100, 1) if s_monthly_gross_min > 0 else 0
+        s_margin_max        = round(s_net_max / s_monthly_gross_max * 100, 1) if s_monthly_gross_max > 0 else 0
+        stage_targets.append({
+            "stage":              s.number,
+            "name":               s.name,
+            "daily_target":       f"${s.daily_min}–${s.daily_max}",
+            "monthly_gross":      f"${s_monthly_gross_min:,.0f}–${s_monthly_gross_max:,.0f}",
+            "monthly_net":        f"${s_net_min:,.0f}–${s_net_max:,.0f}",
+            "margin_range":       f"{s_margin_min:.0f}%–{s_margin_max:.0f}%",
+            "is_current":         s.number == stage.number,
+        })
+
+    return {
+        "timestamp":           datetime.now(timezone.utc).isoformat(),
+        # ── Performance ─────────────────────────────────────────────────────
+        "performance": {
+            "account_balance":  balance,
+            "apy_pct":          apy.get("apy_pct", 0),
+            "avg_daily_usd":    avg_daily_gross,
+            "avg_daily_pct":    apy.get("avg_daily_pct", 0),
+            "total_trades":     len(closed),
+            "trading_days":     apy.get("trading_days", 0),
+            "total_cycles":     len(cycles),
+        },
+        # ── Growth stage ────────────────────────────────────────────────────
+        "growth": {
+            "current_stage":    stage.number,
+            "stage_name":       stage.name,
+            "daily_target":     f"${stage.daily_min}–${stage.daily_max}",
+            "advancement":      advance,
+            "params":           params,
+            "all_stages":       stage_targets,
+        },
+        # ── Cost model ──────────────────────────────────────────────────────
+        "costs": {
+            "monthly": {
+                "anthropic_api":  anthropic_cost,
+                "fly_io":         fly_cost,
+                "vercel":         vercel_cost,
+                "supabase":       supabase_cost,
+                "newsapi":        newsapi_cost,
+                "fred_api":       fred_cost,
+                "domain":         domain_cost,
+                "total":          total_monthly_cost,
+            },
+            "daily_total":    daily_cost,
+            "cost_breakdown": [
+                {"name": "Fly.io (backend)",    "monthly": fly_cost,         "pct": round(fly_cost / total_monthly_cost * 100)},
+                {"name": "Anthropic API",        "monthly": anthropic_cost,   "pct": round(anthropic_cost / total_monthly_cost * 100)},
+                {"name": "Domain",               "monthly": domain_cost,      "pct": round(domain_cost / total_monthly_cost * 100)},
+                {"name": "Vercel / Supabase",    "monthly": 0,                "pct": 0},
+                {"name": "Data feeds (free)",    "monthly": 0,                "pct": 0},
+            ],
+        },
+        # ── Profitability ────────────────────────────────────────────────────
+        "profitability": {
+            "monthly_gross":       round(monthly_gross, 2),
+            "monthly_costs":       total_monthly_cost,
+            "monthly_net":         monthly_net,
+            "profit_margin_pct":   margin_pct,
+            "breakeven_daily_usd": breakeven_daily,
+            "breakeven_monthly":   breakeven_monthly,
+            "target_margin_pct":   65.0,
+            "at_target_margin":    margin_pct >= 60.0,
+            "note": (
+                f"Need >${daily_cost:.2f}/day gross to break even. "
+                f"Need >${daily_cost / 0.35:.2f}/day gross for 65% margin. "
+                f"Currently at {margin_pct:.0f}% margin."
+            ),
+        },
+    }
+
+
 @app.post("/settings")
 async def save_settings(settings: dict):
     """Persist risk settings to DB."""
