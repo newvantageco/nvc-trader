@@ -214,4 +214,140 @@ TRADING_TOOLS: list[dict[str, Any]] = [
             "required": ["ticket", "reason"],
         },
     },
+
+    # ── Intelligence tools (new) ──────────────────────────────────────────────
+
+    {
+        "name": "get_order_flow",
+        "description": (
+            "Get institutional and retail positioning data for an instrument. "
+            "Returns: OANDA order book (where buy/sell orders are clustered by price level), "
+            "retail long/short ratio (contrarian signal — crowd is usually wrong at extremes), "
+            "CFTC COT report (hedge fund non-commercial net positioning, weekly), "
+            "order walls above/below current price, crowding score, and positioning signal. "
+            "Use this to identify if institutional money is positioned FOR or AGAINST your trade, "
+            "and whether retail is dangerously crowded on one side."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "instrument": {
+                    "type": "string",
+                    "description": "Trading instrument symbol (e.g. EURUSD, XAUUSD)",
+                },
+            },
+            "required": ["instrument"],
+        },
+    },
+
+    {
+        "name": "get_macro_environment",
+        "description": (
+            "Get the global macro environment that drives long-term currency and commodity trends. "
+            "Returns: Fed Funds Rate, yield curve spread (2Y vs 10Y — inverted = recession risk), "
+            "inflation expectations, USD bias (HAWKISH/DOVISH), recession risk level, "
+            "and interest rate differentials between currency pairs. "
+            "Use this to understand the dominant macro regime: risk-on, risk-off, dollar strength, etc."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "instruments": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Instruments to compute rate differentials for. Optional.",
+                },
+            },
+            "required": [],
+        },
+    },
+
+    {
+        "name": "get_institutional_research",
+        "description": (
+            "Get the latest research, speeches, and reports from central banks, IMF, BIS, "
+            "and top financial research institutions. "
+            "Returns: Federal Reserve speeches (hawkish/dovish signals), ECB/BoE/BoJ stances, "
+            "IMF and BIS macro outlook, FX analyst research, tone classification per item. "
+            "Use this to understand what the smartest institutions in the world are signalling "
+            "about rate paths, recession risk, and currency outlooks."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "currencies": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Filter by currency codes (e.g. ['USD', 'EUR']). Empty = all.",
+                },
+                "hours": {
+                    "type": "number",
+                    "description": "How many hours back to search. Default 24.",
+                    "default": 24,
+                },
+            },
+            "required": [],
+        },
+    },
+
+    {
+        "name": "get_portfolio_analysis",
+        "description": (
+            "Run portfolio-level financial planning and risk analysis. "
+            "Returns: optimal position sizing via Kelly Criterion (given win rate and avg win/loss), "
+            "Monte Carlo P&L projection (500 simulations, 30-day horizon with percentile outcomes), "
+            "Value at Risk at 95% confidence, maximum expected drawdown, and ruin probability. "
+            "Use this before scaling up position sizes or when deciding overall capital allocation."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "account_balance": {
+                    "type": "number",
+                    "description": "Current account balance in USD",
+                },
+                "win_rate": {
+                    "type": "number",
+                    "description": "Historical win rate (0.0–1.0). Use 0.55 if unknown.",
+                    "default": 0.55,
+                },
+                "avg_win_pips": {
+                    "type": "number",
+                    "description": "Average winning trade size in pips. Default 30.",
+                    "default": 30,
+                },
+                "avg_loss_pips": {
+                    "type": "number",
+                    "description": "Average losing trade size in pips. Default 15.",
+                    "default": 15,
+                },
+                "trades_per_day": {
+                    "type": "number",
+                    "description": "Estimated number of trades per day. Default 3.",
+                    "default": 3,
+                },
+            },
+            "required": ["account_balance"],
+        },
+    },
+
+    {
+        "name": "get_execution_quality",
+        "description": (
+            "Get execution quality metrics: average slippage per instrument, "
+            "spread conditions (is the current spread normal or spiked?), "
+            "best session for trading a given instrument, and recent fill quality. "
+            "Use this to decide WHEN and HOW to execute — avoid trading in poor conditions."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "instrument": {
+                    "type": "string",
+                    "description": "Instrument to check. Leave empty to get all instruments.",
+                },
+            },
+            "required": [],
+        },
+    },
 ]

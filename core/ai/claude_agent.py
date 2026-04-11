@@ -24,6 +24,12 @@ from core.sentiment.finbert_pipeline import SentimentPipeline
 from core.technical.indicator_engine import IndicatorEngine
 from core.ingestion.economic_calendar import EconomicCalendar
 from core.db.supabase_client import SupabaseClient
+from core.ingestion.cot_fetcher import COTFetcher
+from core.ingestion.order_book import OrderBookReader
+from core.ingestion.fred_client import FREDClient
+from core.ingestion.research_fetcher import ResearchFetcher
+from core.execution.smart_executor import SmartExecutor
+from core.planning.portfolio_optimizer import PortfolioOptimizer
 
 
 WATCHLIST = [
@@ -48,7 +54,13 @@ class VantageAgent:
         self.sentiment = SentimentPipeline()
         self.ta_engine = IndicatorEngine()
         self.calendar = EconomicCalendar()
-        self.db = SupabaseClient()
+        self.db              = SupabaseClient()
+        self.cot             = COTFetcher()
+        self.order_book      = OrderBookReader()
+        self.fred            = FREDClient()
+        self.research        = ResearchFetcher()
+        self.smart_executor  = SmartExecutor()
+        self.optimizer       = PortfolioOptimizer()
         self._open_positions: list[dict] = []
         self._account_metrics: dict = {}
 
@@ -159,6 +171,16 @@ class VantageAgent:
                     return await self._tool_close_position(**inputs)
                 case "modify_position":
                     return await self._tool_modify_position(**inputs)
+                case "get_order_flow":
+                    return await self._tool_order_flow(**inputs)
+                case "get_macro_environment":
+                    return await self._tool_macro_environment(**inputs)
+                case "get_institutional_research":
+                    return await self._tool_institutional_research(**inputs)
+                case "get_portfolio_analysis":
+                    return await self._tool_portfolio_analysis(**inputs)
+                case "get_execution_quality":
+                    return await self._tool_execution_quality(**inputs)
                 case _:
                     return {"error": f"Unknown tool: {name}"}
         except Exception as exc:
@@ -281,6 +303,94 @@ class VantageAgent:
         })
         return result
 
+    async def _tool_order_flow(self, instrument: str) -> dict:
+        """COT positioning + OANDA order book combined."""
+        cot_data, ob_data = await asyncio.gather(
+            self.cot.get_positioning(instrument),
+            self.order_book.get_order_flow(instrument),
+        )
+        return {
+            "instrument":          instrument,
+            "cot_positioning":     cot_data,
+            "order_book":          ob_data,
+            "combined_signal": _combine_positioning(cot_data, ob_data),
+        }
+
+    async def _tool_macro_environment(
+        self, instruments: list[str] | None = None
+    ) -> dict:
+        return await self.fred.get_macro_environment(instruments or [])
+
+    async def _tool_institutional_research(
+        self,
+        currencies: list[str] | None = None,
+        hours: int = 24,
+    ) -> dict:
+        items = await self.research.fetch_research(currencies=currencies, hours=hours)
+        # Group by tone
+        by_tone: dict[str, list] = {}
+        for item in items:
+            tone = item.get("tone", "NEUTRAL")
+            by_tone.setdefault(tone, []).append(item)
+
+        return {
+            "total_items": len(items),
+            "by_tone": {k: len(v) for k, v in by_tone.items()},
+            "top_items": items[:10],
+            "dominant_tone": max(by_tone, key=lambda k: len(by_tone[k])) if by_tone else "NEUTRAL",
+        }
+
+    async def _tool_portfolio_analysis(
+        self,
+        account_balance: float,
+        win_rate: float = 0.55,
+        avg_win_pips: float = 30.0,
+        avg_loss_pips: float = 15.0,
+        trades_per_day: float = 3.0,
+    ) -> dict:
+        pip_value = 10.0   # USD per pip per standard lot (approx)
+        kelly = self.optimizer.kelly_position_size(
+            win_rate=win_rate,
+            avg_win_pips=avg_win_pips,
+            avg_loss_pips=avg_loss_pips,
+            account_balance=account_balance,
+            pip_value=pip_value,
+        )
+        mc = self.optimizer.monte_carlo_projection(
+            account_balance=account_balance,
+            win_rate=win_rate,
+            avg_win_usd=avg_win_pips * pip_value * kelly["optimal_lots"],
+            avg_loss_usd=avg_loss_pips * pip_value * kelly["optimal_lots"],
+            trades_per_day=trades_per_day,
+        )
+        return {
+            "account_balance":  account_balance,
+            "kelly_sizing":     kelly,
+            "monte_carlo_30d":  mc,
+            "recommendation":   (
+                f"Optimal lot size: {kelly['optimal_lots']} | "
+                f"50th percentile 30-day balance: ${mc['p50_balance']:,.0f} "
+                f"({mc['expected_return_pct']:+.1f}%) | "
+                f"Ruin probability: {mc['ruin_probability_pct']:.1f}%"
+            ),
+        }
+
+    async def _tool_execution_quality(
+        self, instrument: str | None = None
+    ) -> dict:
+        quality = self.smart_executor.get_execution_quality(instrument)
+        session, liquidity = SmartExecutor._current_session_quality()
+        return {
+            "current_session":    session,
+            "session_quality":    liquidity,
+            "slippage_stats":     quality,
+            "recommendation": (
+                f"Current session: {session} ({liquidity} liquidity). "
+                "Best for Forex: London/NY overlap 12:00–16:00 UTC. "
+                "Best for commodities: NY session 13:00–21:00 UTC."
+            ),
+        }
+
     # ─── Helpers ───────────────────────────────────────────────────────────────
 
     async def _refresh_state(self) -> None:
@@ -358,3 +468,56 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+# ─── Module-level helpers ──────────────────────────────────────────────────────
+
+def _combine_positioning(cot: dict, ob: dict) -> dict:
+    """
+    Synthesise a unified signal from COT institutional positioning
+    and OANDA retail order book data.
+
+    Logic:
+      - If hedge funds are LONG (COT) AND retail is CROWDED_SHORT → STRONG_BUY
+      - If hedge funds are SHORT (COT) AND retail is CROWDED_LONG → STRONG_SELL
+      - If both signals agree → CONFIRMED
+      - If they disagree → MIXED (use as caution flag)
+    """
+    cot_signal = cot.get("positioning_signal", "NEUTRAL")
+    ob_signal  = ob.get("contrarian_bias", "NEUTRAL")
+
+    # Normalize
+    cot_bullish  = cot_signal in ("BULLISH", "EXTREME_LONG")
+    cot_bearish  = cot_signal in ("BEARISH", "EXTREME_SHORT", "EXTREME_LONG_UNWINDING", "EXTREME_SHORT_UNWINDING")
+    ob_bullish   = ob_signal == "FADE_SHORTS"   # retail crowded short → fade = buy
+    ob_bearish   = ob_signal == "FADE_LONGS"    # retail crowded long  → fade = sell
+
+    if cot_bullish and ob_bullish:
+        signal    = "STRONG_BUY"
+        confidence = 0.85
+    elif cot_bearish and ob_bearish:
+        signal    = "STRONG_SELL"
+        confidence = 0.85
+    elif cot_bullish or ob_bullish:
+        signal    = "MODERATE_BUY"
+        confidence = 0.60
+    elif cot_bearish or ob_bearish:
+        signal    = "MODERATE_SELL"
+        confidence = 0.60
+    else:
+        signal    = "NEUTRAL"
+        confidence = 0.50
+
+    return {
+        "signal":          signal,
+        "confidence":      confidence,
+        "cot_signal":      cot_signal,
+        "retail_signal":   ob_signal,
+        "crowding_score":  cot.get("crowding_score", 0),
+        "noncomm_net_pct": cot.get("noncomm_net_pct_oi", 0),
+        "retail_long_pct": ob.get("retail_long_pct", 50),
+        "note": (
+            f"Hedge funds: {cot_signal} ({cot.get('noncomm_net_pct_oi', 0):+.1f}% OI) | "
+            f"Retail: {ob_signal} ({ob.get('retail_long_pct', 50):.0f}% long)"
+        ),
+    }
