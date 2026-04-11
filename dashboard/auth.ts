@@ -1,31 +1,25 @@
-import NextAuth from "next-auth"
-import Credentials from "next-auth/providers/credentials"
+import NextAuth, { NextAuthOptions } from "next-auth"
+import CredentialsProvider from "next-auth/providers/credentials"
 
-const ALLOWED_EMAIL   = "sabanali19@outlook.com"
+const ALLOWED_EMAIL = "sabanali19@outlook.com"
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
+export const authOptions: NextAuthOptions = {
   providers: [
-    Credentials({
+    CredentialsProvider({
+      name: "credentials",
       credentials: {
         email:    { label: "Email",    type: "email"    },
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        const email    = credentials?.email    as string | undefined
-        const password = credentials?.password as string | undefined
+        const email    = credentials?.email    ?? ""
+        const password = credentials?.password ?? ""
 
-        if (!email || !password) return null
-
-        // Single authorised user
         if (
           email.toLowerCase().trim() === ALLOWED_EMAIL &&
           password === process.env.DASHBOARD_PASSWORD
         ) {
-          return {
-            id:    "1",
-            email: ALLOWED_EMAIL,
-            name:  "Saban Ali",
-          }
+          return { id: "1", email: ALLOWED_EMAIL, name: "Saban Ali" }
         }
         return null
       },
@@ -38,7 +32,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
   session: {
     strategy:  "jwt",
-    maxAge:    7 * 24 * 60 * 60,   // 7 days
+    maxAge:    7 * 24 * 60 * 60,
   },
 
   callbacks: {
@@ -53,4 +47,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
 
   secret: process.env.NEXTAUTH_SECRET,
-})
+}
+
+export default NextAuth(authOptions)
