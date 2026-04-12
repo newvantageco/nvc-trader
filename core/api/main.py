@@ -229,6 +229,20 @@ async def get_positions():
     return {"positions": positions}
 
 
+@app.get("/trades")
+async def get_trades(limit: int = 500):
+    trades = await db.select("trades", order_by="-created_at", limit=limit)
+    return {"trades": trades}
+
+
+@app.delete("/positions/{ticket}/close")
+async def close_position(ticket: str):
+    from core.bridge.oanda_client import OandaClient
+    client = OandaClient()
+    result = await client.close_position(int(ticket), reason="manual_close")
+    return result
+
+
 @app.get("/account")
 async def get_account():
     from core.bridge.oanda_client import OandaClient

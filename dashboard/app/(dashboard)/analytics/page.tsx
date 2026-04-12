@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, TrendingUp } from 'lucide-react'
+import { RefreshCw, TrendingUp, Download } from 'lucide-react'
 import dynamic from 'next/dynamic'
 
 const EquityChart = dynamic(() => import('@/components/EquityChart'), { ssr: false })
@@ -63,6 +63,26 @@ export default function AnalyticsPage() {
   const [loading,   setLoading]   = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+  const [trades, setTrades] = useState<Array<Record<string, unknown>>>([])
+
+  const exportCSV = useCallback(() => {
+    if (!trades.length && !metrics) return
+    const rows = trades.length ? trades : []
+    const headers = rows.length
+      ? Object.keys(rows[0])
+      : ['instrument', 'direction', 'pnl', 'status', 'created_at']
+    const csv = [
+      headers.join(','),
+      ...rows.map(r => headers.map(h => JSON.stringify(r[h] ?? '')).join(','))
+    ].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href     = url
+    a.download = `nvc-trades-${new Date().toISOString().slice(0,10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [trades, metrics])
 
   const loadData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -80,6 +100,11 @@ export default function AnalyticsPage() {
       fetch(`${API}/cycles?limit=50`)
         .then(r => r.json())
         .then(d => setCycles(d.cycles || [])),
+
+      fetch(`${API}/trades?limit=500`)
+        .then(r => r.ok ? r.json() : { trades: [] })
+        .then(d => setTrades(d.trades || []))
+        .catch(() => {}),
     ])
 
     setLoading(false)
@@ -106,12 +131,22 @@ export default function AnalyticsPage() {
             Performance · Equity curve · Trade history
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           {lastRefresh && (
-            <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>
+            <span className="text-xs font-mono hidden sm:block" style={{ color: 'var(--text-muted)' }}>
               {lastRefresh.toLocaleTimeString()}
             </span>
           )}
+          <button
+            onClick={exportCSV}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs transition-opacity disabled:opacity-40"
+            style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+            aria-label="Export trades as CSV"
+          >
+            <Download size={11} />
+            <span className="hidden sm:inline">Export CSV</span>
+          </button>
           <button
             onClick={() => loadData(true)}
             disabled={refreshing}
@@ -119,7 +154,7 @@ export default function AnalyticsPage() {
             style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
           >
             <RefreshCw size={11} className={refreshing ? 'animate-spin' : ''} />
-            Refresh
+            <span className="hidden sm:inline">Refresh</span>
           </button>
         </div>
       </div>
@@ -153,7 +188,7 @@ export default function AnalyticsPage() {
                style={{ color: 'var(--text-muted)' }}>
             Performance Metrics
           </div>
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <StatCard loading={loading} label="WIN RATE"      value={`${wr}%`}       sub={`${metrics?.winning_trades || 0}W / ${metrics?.losing_trades || 0}L`} color={parseFloat(wr) > 50 ? 'var(--bull)' : 'var(--bear)'} />
             <StatCard loading={loading} label="PROFIT FACTOR" value={pf}             sub="target >1.5" color={parseFloat(pf) > 1.5 ? 'var(--bull)' : 'var(--accent)'} />
             <StatCard loading={loading} label="SHARPE RATIO"  value={sr}             sub="annualised"  color={parseFloat(sr) > 1 ? 'var(--bull)' : 'var(--accent)'} />
