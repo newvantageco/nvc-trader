@@ -1,9 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import Sidebar from '@/components/Sidebar'
+import { useEffect, useState, useCallback } from 'react'
+import { RefreshCw, TrendingUp } from 'lucide-react'
+import dynamic from 'next/dynamic'
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'https://nvc-trader-engine.fly.dev'
+const EquityChart = dynamic(() => import('@/components/EquityChart'), { ssr: false })
+
+const API = process.env.NEXT_PUBLIC_API_URL || 'https://nvc-trader.fly.dev'
 
 interface Metrics {
   total_trades: number
@@ -20,31 +23,71 @@ interface Metrics {
   by_instrument: Record<string, { trades: number; pnl: number; win_rate: number }>
 }
 
-function StatCard({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
+interface Snapshot {
+  timestamp: string
+  equity: number
+  balance: number
+}
+
+// ── Skeleton block ─────────────────────────────────────────────────────────────
+function Skeleton({ w = '100%', h = 16 }: { w?: string | number; h?: number }) {
   return (
-    <div className="p-4 rounded border" style={{ borderColor: 'var(--border)', background: 'var(--bg-surface)' }}>
-      <div className="text-xs tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>{label}</div>
-      <div className="text-xl font-mono font-bold" style={{ color: color || 'var(--text-primary)' }}>{value}</div>
-      {sub && <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{sub}</div>}
+    <div className="skeleton" style={{ width: w, height: h }} />
+  )
+}
+
+function StatCard({
+  label, value, sub, color, loading,
+}: {
+  label: string; value: string; sub?: string; color?: string; loading?: boolean
+}) {
+  return (
+    <div className="p-4 rounded border flex flex-col gap-1"
+         style={{ borderColor: 'var(--border)', background: 'var(--bg-surface)' }}>
+      <div className="text-xs tracking-wider" style={{ color: 'var(--text-muted)' }}>{label}</div>
+      {loading
+        ? <Skeleton h={24} w="60%" />
+        : <div className="text-xl font-mono font-bold" style={{ color: color || 'var(--text-primary)' }}>{value}</div>
+      }
+      {sub && !loading && (
+        <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{sub}</div>
+      )}
     </div>
   )
 }
 
 export default function AnalyticsPage() {
-  const [metrics, setMetrics] = useState<Metrics | null>(null)
-  const [cycles,  setCycles]  = useState<Array<{ cycle_id: string; timestamp: string; trades_executed: number; trigger: string }>>([])
+  const [metrics,   setMetrics]   = useState<Metrics | null>(null)
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([])
+  const [cycles,    setCycles]    = useState<Array<{ cycle_id: string; timestamp: string; trades_executed: number; trigger: string }>>([])
+  const [loading,   setLoading]   = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
 
-  useEffect(() => {
-    fetch(`${API}/analytics`)
-      .then(r => r.json())
-      .then(d => setMetrics(d))
-      .catch(() => {})
+  const loadData = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
+    else setRefreshing(true)
 
-    fetch(`${API}/cycles`)
-      .then(r => r.json())
-      .then(d => setCycles(d.cycles || []))
-      .catch(() => {})
+    await Promise.allSettled([
+      fetch(`${API}/analytics`)
+        .then(r => r.json())
+        .then(d => setMetrics(d)),
+
+      fetch(`${API}/account/snapshots?limit=168`)
+        .then(r => r.json())
+        .then(d => setSnapshots(d.snapshots || [])),
+
+      fetch(`${API}/cycles?limit=50`)
+        .then(r => r.json())
+        .then(d => setCycles(d.cycles || [])),
+    ])
+
+    setLoading(false)
+    setRefreshing(false)
+    setLastRefresh(new Date())
   }, [])
+
+  useEffect(() => { loadData() }, [loadData])
 
   const wr = metrics?.win_rate ? (metrics.win_rate * 100).toFixed(1) : '—'
   const pf = metrics?.profit_factor?.toFixed(2) ?? '—'
@@ -52,68 +95,125 @@ export default function AnalyticsPage() {
   const dd = metrics?.max_drawdown_pct?.toFixed(2) ?? '—'
 
   return (
-    <div className="flex min-h-screen" style={{ background: 'var(--bg-base)' }}>
-      <Sidebar />
-      <div className="flex-1 overflow-auto">
-        <div className="px-6 py-4 border-b"
-             style={{ borderColor: 'var(--border)', background: 'var(--bg-surface)' }}>
+    <div className="flex flex-col h-full overflow-auto" style={{ background: 'var(--bg-base)' }}>
+
+      {/* Header */}
+      <div className="px-6 py-3 border-b flex items-center justify-between flex-shrink-0"
+           style={{ borderColor: 'var(--border)', background: 'var(--bg-surface)' }}>
+        <div>
           <h1 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>Analytics</h1>
-          <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>Performance metrics · Trade history</p>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+            Performance · Equity curve · Trade history
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {lastRefresh && (
+            <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>
+              {lastRefresh.toLocaleTimeString()}
+            </span>
+          )}
+          <button
+            onClick={() => loadData(true)}
+            disabled={refreshing}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs transition-opacity disabled:opacity-40"
+            style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+          >
+            <RefreshCw size={11} className={refreshing ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <div className="p-6 flex flex-col gap-6">
+
+        {/* Equity Curve */}
+        <div className="rounded border p-4"
+             style={{ borderColor: 'var(--border)', background: 'var(--bg-surface)' }}>
+          <div className="flex items-center gap-2 mb-3">
+            <TrendingUp size={13} style={{ color: 'var(--accent)' }} />
+            <span className="text-xs font-semibold tracking-wider uppercase"
+                  style={{ color: 'var(--text-muted)' }}>
+              Equity Curve + Drawdown
+            </span>
+            <span className="text-xs font-mono ml-auto" style={{ color: 'var(--text-muted)' }}>
+              {snapshots.length > 0
+                ? `${snapshots.length} snapshots · $${snapshots[snapshots.length - 1]?.equity?.toFixed(2) ?? '—'}`
+                : 'awaiting data'}
+            </span>
+          </div>
+          {loading
+            ? <Skeleton h={220} />
+            : <EquityChart snapshots={snapshots} height={220} />
+          }
         </div>
 
-        <div className="p-6">
-          {/* KPI grid */}
-          <div className="grid grid-cols-4 gap-3 mb-6">
-            <StatCard label="WIN RATE"      value={`${wr}%`}        sub={`${metrics?.winning_trades || 0}W / ${metrics?.losing_trades || 0}L`} color={parseFloat(wr) > 50 ? 'var(--bull)' : 'var(--bear)'} />
-            <StatCard label="PROFIT FACTOR" value={pf}              sub="target >1.5" color={parseFloat(pf) > 1.5 ? 'var(--bull)' : 'var(--accent)'} />
-            <StatCard label="SHARPE RATIO"  value={sr}              sub="annualised" color={parseFloat(sr) > 1 ? 'var(--bull)' : 'var(--accent)'} />
-            <StatCard label="MAX DRAWDOWN"  value={`-${dd}%`}       sub="from peak"  color="var(--bear)" />
-            <StatCard label="TOTAL P&L"     value={`$${(metrics?.total_pnl || 0).toFixed(2)}`} color={(metrics?.total_pnl || 0) >= 0 ? 'var(--bull)' : 'var(--bear)'} />
-            <StatCard label="AVG WIN"       value={`$${(metrics?.avg_win || 0).toFixed(2)}`}    color="var(--bull)" />
-            <StatCard label="AVG LOSS"      value={`$${(metrics?.avg_loss || 0).toFixed(2)}`}   color="var(--bear)" />
-            <StatCard label="TOTAL SIGNALS" value={String(metrics?.total_signals || 0)} sub="all generated" />
+        {/* KPI grid */}
+        <div>
+          <div className="text-xs font-semibold tracking-wider mb-3 uppercase"
+               style={{ color: 'var(--text-muted)' }}>
+            Performance Metrics
           </div>
+          <div className="grid grid-cols-4 gap-3">
+            <StatCard loading={loading} label="WIN RATE"      value={`${wr}%`}       sub={`${metrics?.winning_trades || 0}W / ${metrics?.losing_trades || 0}L`} color={parseFloat(wr) > 50 ? 'var(--bull)' : 'var(--bear)'} />
+            <StatCard loading={loading} label="PROFIT FACTOR" value={pf}             sub="target >1.5" color={parseFloat(pf) > 1.5 ? 'var(--bull)' : 'var(--accent)'} />
+            <StatCard loading={loading} label="SHARPE RATIO"  value={sr}             sub="annualised"  color={parseFloat(sr) > 1 ? 'var(--bull)' : 'var(--accent)'} />
+            <StatCard loading={loading} label="MAX DRAWDOWN"  value={`-${dd}%`}      sub="from peak"   color="var(--bear)" />
+            <StatCard loading={loading} label="TOTAL P&L"     value={`$${(metrics?.total_pnl || 0).toFixed(2)}`} color={(metrics?.total_pnl || 0) >= 0 ? 'var(--bull)' : 'var(--bear)'} />
+            <StatCard loading={loading} label="AVG WIN"       value={`$${(metrics?.avg_win || 0).toFixed(2)}`}   color="var(--bull)" />
+            <StatCard loading={loading} label="AVG LOSS"      value={`$${(metrics?.avg_loss || 0).toFixed(2)}`}  color="var(--bear)" />
+            <StatCard loading={loading} label="TOTAL SIGNALS" value={String(metrics?.total_signals || 0)} sub="all generated" />
+          </div>
+        </div>
 
-          {/* Per-instrument */}
-          {metrics?.by_instrument && Object.keys(metrics.by_instrument).length > 0 && (
-            <div className="mb-6">
-              <div className="text-xs font-semibold tracking-wider mb-3" style={{ color: 'var(--text-muted)' }}>
-                PER INSTRUMENT
-              </div>
-              <table className="w-full text-xs font-mono">
-                <thead>
-                  <tr style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
-                    <th className="text-left py-2 pr-6">Instrument</th>
-                    <th className="text-right py-2 pr-6">Trades</th>
-                    <th className="text-right py-2 pr-6">Win Rate</th>
-                    <th className="text-right py-2">P&L</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(metrics.by_instrument).map(([sym, d]) => (
-                    <tr key={sym} className="border-b" style={{ borderColor: 'var(--border)' }}>
-                      <td className="py-2 pr-6 font-semibold" style={{ color: 'var(--text-primary)' }}>{sym}</td>
-                      <td className="py-2 pr-6 text-right" style={{ color: 'var(--text-secondary)' }}>{d.trades}</td>
-                      <td className="py-2 pr-6 text-right"
-                          style={{ color: d.win_rate > 0.5 ? 'var(--bull)' : 'var(--bear)' }}>
-                        {(d.win_rate * 100).toFixed(0)}%
-                      </td>
-                      <td className="py-2 text-right font-semibold"
-                          style={{ color: d.pnl >= 0 ? 'var(--bull)' : 'var(--bear)' }}>
-                        {d.pnl >= 0 ? '+' : ''}${d.pnl.toFixed(2)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Agent cycle log */}
+        {/* Per-instrument */}
+        {!loading && metrics?.by_instrument && Object.keys(metrics.by_instrument).length > 0 && (
           <div>
-            <div className="text-xs font-semibold tracking-wider mb-3" style={{ color: 'var(--text-muted)' }}>
-              AGENT CYCLE LOG
+            <div className="text-xs font-semibold tracking-wider mb-3 uppercase"
+                 style={{ color: 'var(--text-muted)' }}>
+              Per Instrument
             </div>
+            <table className="w-full text-xs font-mono">
+              <thead>
+                <tr style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
+                  <th className="text-left py-2 pr-6">Instrument</th>
+                  <th className="text-right py-2 pr-6">Trades</th>
+                  <th className="text-right py-2 pr-6">Win Rate</th>
+                  <th className="text-right py-2">P&L</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(metrics.by_instrument)
+                  .sort(([, a], [, b]) => b.pnl - a.pnl)
+                  .map(([sym, d]) => (
+                  <tr key={sym} className="border-b" style={{ borderColor: 'var(--border)' }}>
+                    <td className="py-2 pr-6 font-semibold" style={{ color: 'var(--text-primary)' }}>{sym}</td>
+                    <td className="py-2 pr-6 text-right" style={{ color: 'var(--text-secondary)' }}>{d.trades}</td>
+                    <td className="py-2 pr-6 text-right"
+                        style={{ color: d.win_rate > 0.5 ? 'var(--bull)' : 'var(--bear)' }}>
+                      {(d.win_rate * 100).toFixed(0)}%
+                    </td>
+                    <td className="py-2 text-right font-semibold"
+                        style={{ color: d.pnl >= 0 ? 'var(--bull)' : 'var(--bear)' }}>
+                      {d.pnl >= 0 ? '+' : ''}${d.pnl.toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Agent cycle log */}
+        <div>
+          <div className="text-xs font-semibold tracking-wider mb-3 uppercase"
+               style={{ color: 'var(--text-muted)' }}>
+            Agent Cycle Log
+          </div>
+          {loading ? (
+            <div className="flex flex-col gap-2">
+              {[...Array(5)].map((_, i) => <Skeleton key={i} h={28} />)}
+            </div>
+          ) : (
             <table className="w-full text-xs font-mono">
               <thead>
                 <tr style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
@@ -123,8 +223,8 @@ export default function AnalyticsPage() {
                 </tr>
               </thead>
               <tbody>
-                {cycles.map(c => (
-                  <tr key={c.cycle_id} className="border-b" style={{ borderColor: 'var(--border)' }}>
+                {cycles.map((c, i) => (
+                  <tr key={c.cycle_id || i} className="border-b" style={{ borderColor: 'var(--border)' }}>
                     <td className="py-1.5 pr-6" style={{ color: 'var(--text-muted)' }}>
                       {c.timestamp?.slice(0, 19).replace('T', ' ')}
                     </td>
@@ -137,10 +237,12 @@ export default function AnalyticsPage() {
                 ))}
               </tbody>
             </table>
-            {cycles.length === 0 && (
-              <div className="text-xs py-4" style={{ color: 'var(--text-muted)' }}>No cycles yet.</div>
-            )}
-          </div>
+          )}
+          {!loading && cycles.length === 0 && (
+            <div className="text-xs py-4" style={{ color: 'var(--text-muted)' }}>
+              No cycles recorded yet — agent runs every 15 minutes.
+            </div>
+          )}
         </div>
       </div>
     </div>

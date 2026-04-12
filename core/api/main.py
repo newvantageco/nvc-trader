@@ -492,6 +492,14 @@ async def admin_overview():
     }
 
 
+@app.get("/account/snapshots")
+async def get_account_snapshots(limit: int = 168):
+    """Return equity curve for the last N snapshots (default 168 = 1 week of hourly)."""
+    snapshots = await db.select("account_snapshots", order_by="-timestamp", limit=limit)
+    snapshots.reverse()  # oldest first for chart rendering
+    return {"snapshots": snapshots}
+
+
 @app.post("/settings")
 async def save_settings(settings: dict):
     """Persist risk settings to DB."""

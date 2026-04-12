@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-interface Signal {
+export interface Signal {
   instrument: string
   direction: 'BUY' | 'SELL'
   score: number
@@ -8,7 +8,7 @@ interface Signal {
   reason: string
 }
 
-interface Position {
+export interface Position {
   ticket: number
   instrument: string
   direction: 'BUY' | 'SELL'
@@ -20,39 +20,64 @@ interface Position {
   profit: number
 }
 
-interface AccountMetrics {
+export interface AccountMetrics {
   equity: number
   balance: number
   daily_drawdown_pct: number
   system_status: string
 }
 
+export type ToastType = 'success' | 'error' | 'warning' | 'info'
+
+export interface Toast {
+  id: string
+  type: ToastType
+  title: string
+  message?: string
+}
+
 interface NVCStore {
   connected: boolean
+  wsReconnects: number
   agentStatus: 'active' | 'paused' | 'emergency_stop'
   lastCycle: string | null
   signals: Signal[]
   positions: Position[]
   account: AccountMetrics | null
+  toasts: Toast[]
+
   setConnected: (v: boolean) => void
+  incReconnects: () => void
   setAgentStatus: (v: 'active' | 'paused' | 'emergency_stop') => void
   addSignal: (s: Signal) => void
   setPositions: (p: Position[]) => void
   setAccount: (a: AccountMetrics) => void
   setLastCycle: (t: string) => void
+  addToast: (t: Omit<Toast, 'id'>) => void
+  removeToast: (id: string) => void
 }
 
 export const useNVCStore = create<NVCStore>(set => ({
   connected: false,
+  wsReconnects: 0,
   agentStatus: 'active',
   lastCycle: null,
   signals: [],
   positions: [],
   account: null,
-  setConnected: connected => set({ connected }),
+  toasts: [],
+
+  setConnected:   connected  => set({ connected }),
+  incReconnects:  ()         => set(s => ({ wsReconnects: s.wsReconnects + 1 })),
   setAgentStatus: agentStatus => set({ agentStatus }),
-  addSignal: signal => set(s => ({ signals: [...s.signals.slice(-99), signal] })),
-  setPositions: positions => set({ positions }),
-  setAccount: account => set({ account }),
-  setLastCycle: lastCycle => set({ lastCycle }),
+  addSignal:      signal     => set(s => ({ signals: [...s.signals.slice(-99), signal] })),
+  setPositions:   positions  => set({ positions }),
+  setAccount:     account    => set({ account }),
+  setLastCycle:   lastCycle  => set({ lastCycle }),
+
+  addToast: (t) => {
+    const id = `${Date.now()}-${Math.random()}`
+    set(s => ({ toasts: [...s.toasts.slice(-4), { ...t, id }] }))
+  },
+  removeToast: (id) => set(s => ({ toasts: s.toasts.filter(t => t.id !== id) })),
 }))
