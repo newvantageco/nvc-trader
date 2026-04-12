@@ -20,31 +20,37 @@ export default function Sidebar() {
     <aside
       className="w-14 flex-shrink-0 flex flex-col items-center py-4 gap-1 border-r"
       style={{ background: 'var(--bg-surface)', borderColor: 'var(--border)' }}
+      aria-label="Main navigation"
     >
       {/* Logo mark */}
       <div className="mb-4 font-mono font-bold text-xs"
+           aria-label="NVC Trading"
            style={{ color: 'var(--accent)', letterSpacing: '0.15em' }}>
         NVC
       </div>
 
-      {NAV.map(({ href, label, icon: Icon }) => {
-        const active = pathname === href
-        return (
-          <Link
-            key={href}
-            href={href}
-            title={label}
-            className="w-10 h-10 flex items-center justify-center rounded transition-colors"
-            style={{
-              background:  active ? 'var(--bg-elevated)' : 'transparent',
-              color:       active ? 'var(--accent)'      : 'var(--text-muted)',
-              borderLeft:  active ? `2px solid var(--accent)` : '2px solid transparent',
-            }}
-          >
-            <Icon size={18} />
-          </Link>
-        )
-      })}
+      <nav role="navigation">
+        {NAV.map(({ href, label, icon: Icon }) => {
+          const active = pathname === href
+          return (
+            <Link
+              key={href}
+              href={href}
+              aria-label={label}
+              aria-current={active ? 'page' : undefined}
+              title={label}
+              className="w-10 h-10 flex items-center justify-center rounded transition-colors mb-1"
+              style={{
+                background:  active ? 'var(--bg-elevated)' : 'transparent',
+                color:       active ? 'var(--accent)'      : 'var(--text-muted)',
+                borderLeft:  active ? '2px solid var(--accent)' : '2px solid transparent',
+              }}
+            >
+              <Icon size={18} aria-hidden="true" />
+            </Link>
+          )
+        })}
+      </nav>
     </aside>
   )
 }

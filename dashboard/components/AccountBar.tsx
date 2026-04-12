@@ -5,8 +5,20 @@ import { useNVCStore } from '@/lib/store'
 export default function AccountBar() {
   const { account } = useNVCStore()
 
-  const equity = account?.equity ?? 0
-  const dailyDD = account?.daily_drawdown_pct ?? 0
+  if (!account) {
+    return (
+      <div className="flex items-center gap-6">
+        {[0, 1].map(i => (
+          <div key={i} className="flex flex-col items-center gap-1">
+            <div className="skeleton" style={{ width: 40, height: 10 }} />
+            <div className="skeleton" style={{ width: 64, height: 14 }} />
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  const { equity, daily_drawdown_pct: dd } = account
 
   return (
     <div className="flex items-center gap-6 font-mono text-xs">
@@ -19,8 +31,8 @@ export default function AccountBar() {
       <div className="flex flex-col items-center">
         <span style={{ color: 'var(--text-muted)' }}>DAILY DD</span>
         <span className="font-semibold"
-              style={{ color: dailyDD > 2 ? 'var(--bear)' : dailyDD > 1 ? 'var(--accent)' : 'var(--bull)' }}>
-          -{dailyDD.toFixed(2)}%
+              style={{ color: dd > 2 ? 'var(--bear)' : dd > 1 ? 'var(--accent)' : 'var(--bull)' }}>
+          -{dd.toFixed(2)}%
         </span>
       </div>
     </div>
