@@ -18,9 +18,9 @@ class CircuitBreaker:
     """
 
     def __init__(self) -> None:
-        self.max_daily_dd   = float(os.environ.get("MAX_DAILY_DRAWDOWN_PCT",   3.0))
-        self.max_weekly_dd  = float(os.environ.get("MAX_WEEKLY_DRAWDOWN_PCT",  6.0))
-        self.max_monthly_dd = float(os.environ.get("MAX_MONTHLY_DRAWDOWN_PCT", 10.0))
+        self.max_daily_dd   = float(os.environ.get("MAX_DAILY_DRAWDOWN_PCT",   2.0))  # R1: halt at 2%
+        self.max_weekly_dd  = float(os.environ.get("MAX_WEEKLY_DRAWDOWN_PCT",  5.0))  # R5: halve sizes at 5%
+        self.max_monthly_dd = float(os.environ.get("MAX_MONTHLY_DRAWDOWN_PCT", 10.0)) # R7: hard stop at 10%
         self._metrics: dict = {}
         self._computed_dd: dict = {"daily": 0.0, "weekly": 0.0, "monthly": 0.0}
         self._hard_stop    = False

@@ -512,21 +512,62 @@ class VantageAgent:
     def _build_context_message(self, trigger: str) -> str:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         open_count = len(self._open_positions)
-        equity = self._account_metrics.get("equity", "unknown")
+        equity = self._account_metrics.get("equity", 0)
+        balance = self._account_metrics.get("balance", 0)
         daily_dd = self._account_metrics.get("daily_drawdown_pct", 0.0)
+        weekly_dd = self._account_metrics.get("weekly_drawdown_pct", 0.0)
+        system_status = self._account_metrics.get("system_status", "OK")
+        cb_status = self.circuit_breaker.status()
+
+        # Pre-flight risk gate — encode hard stops directly in the context
+        risk_warnings = []
+        if daily_dd >= 2.0:
+            risk_warnings.append("⛔ DAILY DRAWDOWN ≥ 2% — RULE R1: Close all positions, flat for rest of day. NO NEW ENTRIES.")
+        elif daily_dd >= 1.5:
+            risk_warnings.append("⚠️  Daily drawdown ≥ 1.5% — RULE R2: Reduce all new position sizes by 50%.")
+        if weekly_dd >= 5.0:
+            risk_warnings.append("⚠️  Weekly drawdown ≥ 5% — RULE R5: Halve all position sizes this week.")
+
+        risk_block = "\n".join(risk_warnings) if risk_warnings else "✅ Risk limits clear"
+
+        # Format open positions compactly
+        pos_lines = []
+        for p in self._open_positions:
+            pos_lines.append(
+                f"  • {p.get('instrument','?')} {p.get('direction','?')} "
+                f"lot={p.get('lot_size','?')} pnl={p.get('unrealised_pnl',0):+.2f} "
+                f"ticket={p.get('ticket','?')}"
+            )
+        pos_block = "\n".join(pos_lines) if pos_lines else "  (none)"
 
         return (
-            f"VANTAGE CYCLE — {now}\n"
-            f"Trigger: {trigger}\n"
-            f"Account equity: ${equity:,}\n"
-            f"Daily drawdown: {daily_dd:.2f}%\n"
-            f"Open positions: {open_count}/8\n\n"
-            f"Watchlist: {', '.join(WATCHLIST)}\n\n"
-            "Please begin your analysis cycle. Start by checking the economic calendar "
-            "for blackout periods, then systematically analyse each instrument on the watchlist. "
-            "Execute any valid trades that meet the minimum score threshold. "
-            "Manage any open positions that need attention (trailing stops, breakeven, close). "
-            "Provide a full summary of your reasoning and actions at the end."
+            f"═══════════════════════════════════════════\n"
+            f"  VANTAGE CYCLE — {now}\n"
+            f"  Trigger: {trigger}\n"
+            f"═══════════════════════════════════════════\n\n"
+            f"ACCOUNT STATUS\n"
+            f"  Balance:        ${balance:,.2f}\n"
+            f"  Equity:         ${equity:,.2f}\n"
+            f"  Daily DD:       {daily_dd:.2f}%\n"
+            f"  Weekly DD:      {weekly_dd:.2f}%\n"
+            f"  Open positions: {open_count}/8\n"
+            f"  System:         {system_status}\n\n"
+            f"RISK STATUS\n"
+            f"  {risk_block}\n\n"
+            f"OPEN POSITIONS\n"
+            f"{pos_block}\n\n"
+            f"WATCHLIST\n"
+            f"  {', '.join(WATCHLIST)}\n\n"
+            f"INSTRUCTIONS\n"
+            f"  Follow the 6-step framework in your system prompt exactly:\n"
+            f"  1. Identify regime (get_market_regime)\n"
+            f"  2. Macro analysis (get_macro_environment + get_institutional_research)\n"
+            f"  3. Positioning (get_order_flow for candidates)\n"
+            f"  4. Technical confirmation (get_technical_analysis)\n"
+            f"  5. News filter (get_news_sentiment + get_economic_calendar)\n"
+            f"  6. Trade/No-trade decision (≥3 factors aligned required)\n\n"
+            f"  Priority: Manage open positions first. Then scan watchlist.\n"
+            f"  End with the structured cycle summary as specified.\n"
         )
 
     def _extract_text(self, content: list) -> str:

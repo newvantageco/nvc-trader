@@ -99,9 +99,9 @@ class EdgeFilter:
         if r == "TRENDING_BEARISH" and direction == "BUY":
             regime_ok = False
             notes.append("Buying into a bearish trend — high risk")
-        if r in ("VOLATILE", "EXHAUSTED"):
+        if r in ("VOLATILE", "EXHAUSTED", "CRISIS"):
             regime_ok = False
-            notes.append(f"Regime {r} — not tradeable")
+            notes.append(f"Regime {r} — not tradeable (reduce to 0.3× size, manage existing only)")
 
         conditions["regime"] = regime_ok
         if regime_ok:
@@ -233,11 +233,11 @@ class EdgeFilter:
         daily_dd   = account.get("daily_drawdown_pct", 0.0)
         open_count = account.get("open_positions", 0)
 
-        risk_ok = daily_dd < 2.5 and open_count < 7
+        risk_ok = daily_dd < 2.0 and open_count < 7
         conditions["risk"] = risk_ok
         if not risk_ok:
-            if daily_dd >= 2.5:
-                notes.append(f"Risk: daily drawdown {daily_dd:.1f}% ≥ 2.5% limit ✗")
+            if daily_dd >= 2.0:
+                notes.append(f"Risk: daily drawdown {daily_dd:.1f}% ≥ 2.0% daily limit (Rule R1) ✗")
             if open_count >= 7:
                 notes.append(f"Risk: {open_count} open trades ≥ 7 limit ✗")
         else:

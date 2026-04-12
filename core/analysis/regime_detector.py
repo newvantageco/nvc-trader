@@ -116,6 +116,15 @@ class RegimeDetector:
         atr_avg     = float(atr_s.rolling(20).mean().iloc[-1]) if atr_s is not None else atr
         atr_ratio   = atr / atr_avg if atr_avg > 0 else 1.0
 
+        # ── Autocorrelation (1-lag on 20-bar returns) ─────────────────────────
+        # > +0.2 = trending (momentum); near 0 = ranging; < -0.2 = mean-reverting
+        try:
+            returns      = df["close"].pct_change().dropna()
+            autocorr     = float(returns.iloc[-20:].autocorr(lag=1)) if len(returns) >= 20 else 0.0
+            autocorr     = 0.0 if pd.isna(autocorr) else round(autocorr, 3)
+        except Exception:
+            autocorr = 0.0
+
         # ── EMA alignment ─────────────────────────────────────────────────────
         ema9   = ta.ema(df["close"], length=9)
         ema21  = ta.ema(df["close"], length=21)
@@ -151,9 +160,9 @@ class RegimeDetector:
             conf     = 0.75
 
         elif atr_ratio > 1.8:
-            regime   = "VOLATILE"
-            tradeable = False   # don't trade volatility spikes without a catalyst
-            hint     = f"High volatility (ATR {atr_ratio:.1f}× normal) — reduce size, wait for structure"
+            regime   = "CRISIS"
+            tradeable = False   # CRISIS: reduce to 0.3× sizing only, no new entries
+            hint     = f"CRISIS: ATR {atr_ratio:.1f}× normal — reduce all sizes to 0.3×, hold cash, manage existing only"
             strength = 0.0
             conf     = 0.85
 
@@ -186,6 +195,7 @@ class RegimeDetector:
             "minus_di":       round(minus_di, 1),
             "atr":            round(atr, 5),
             "atr_ratio":      round(atr_ratio, 2),
+            "autocorr":       autocorr,
             "ema_aligned":    ema_bullish or ema_bearish,
             "trend_strength": round(strength, 2),
             "tradeable":      tradeable,
@@ -195,8 +205,6 @@ class RegimeDetector:
 
     @staticmethod
     def _default_regime(instrument: str) -> dict:
-        # tradeable=False: we have no data. A 0.30 confidence RANGING assumption
-        # is not enough to risk capital — edge filter will block via regime condition.
         return {
             "instrument":     instrument,
             "regime":         "RANGING",
@@ -205,6 +213,7 @@ class RegimeDetector:
             "minus_di":       0.0,
             "atr":            0.0,
             "atr_ratio":      1.0,
+            "autocorr":       0.0,
             "ema_aligned":    False,
             "trend_strength": 0.0,
             "tradeable":      False,
