@@ -20,6 +20,11 @@ primary_region = "lhr"    # London — closest to EU/UK markets
   auto_start_machines = true
   min_machines_running = 1
 
+  # Allow WebSocket connections and long-running SSE streams
+  [http_service.http_options]
+    idle_timeout = 120          # seconds before Fly closes idle HTTP/WS connections
+    response.headers = {}       # don't strip Upgrade/Connection headers
+
   [http_service.concurrency]
     type       = "requests"
     hard_limit = 100

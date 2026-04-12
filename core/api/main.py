@@ -66,11 +66,12 @@ async def lifespan(app: FastAPI):
     # Startup — validate env before anything else
     _validate_env()
     logger.info("[API] NVC Core Engine starting...")
-    scheduler.add_job(run_scheduled_cycle, "cron", minute="*/15")   # Every 15 min
-    scheduler.add_job(run_news_scan, "cron", minute="*/2")           # News scan every 2 min
-    scheduler.add_job(run_account_snapshot, "cron", minute=0)        # Hourly snapshots (P0)
+    scheduler.add_job(run_scheduled_cycle,  "cron", minute="*/15")  # Every 15 min
+    scheduler.add_job(run_news_scan,         "cron", minute="*/2")   # News scan every 2 min
+    scheduler.add_job(run_account_snapshot,  "cron", minute=0)       # Hourly snapshots
+    scheduler.add_job(run_live_push,         "interval", seconds=30) # Live account/positions push
     scheduler.start()
-    logger.info("[API] Scheduler started — agent 15min | news 2min | snapshots hourly")
+    logger.info("[API] Scheduler started — agent 15min | news 2min | snapshots hourly | live push 30s")
     yield
     # Shutdown
     scheduler.shutdown()
@@ -175,6 +176,29 @@ async def run_account_snapshot():
         logger.error(f"[SNAPSHOT] Failed to write account snapshot: {exc}")
 
 
+async def run_live_push():
+    """
+    Broadcast fresh account + positions to all WebSocket clients every 30 seconds.
+    Keeps the dashboard live between agent cycles without waiting 15 min.
+    """
+    if not ws_manager.has_connections():
+        return  # nobody watching — skip the OANDA call
+    try:
+        from core.bridge.oanda_client import OandaClient
+        oanda = OandaClient()
+        account, positions = await asyncio.gather(
+            oanda.get_account_info(),
+            oanda.get_positions(),
+            return_exceptions=True,
+        )
+        if not isinstance(account, Exception):
+            await ws_manager.broadcast({"type": "account_update",   "data": account})
+        if not isinstance(positions, Exception):
+            await ws_manager.broadcast({"type": "positions_update", "data": {"positions": positions}})
+    except Exception as exc:
+        logger.debug(f"[LIVE PUSH] Failed: {exc}")
+
+
 # ─── REST Endpoints ────────────────────────────────────────────────────────────
 
 @app.get("/health")
@@ -184,10 +208,21 @@ async def health():
 
 @app.post("/agent/run")
 async def trigger_agent(trigger: str = "manual"):
-    """Manually trigger an agent cycle."""
-    result = await agent.run_cycle(trigger=f"manual:{trigger}")
-    await ws_manager.broadcast({"type": "manual_cycle", "data": result})
-    return result
+    """
+    Trigger an agent cycle.
+    Returns 202 immediately — result is broadcast via WebSocket when done.
+    Claude Opus can take 30-90s; keeping the HTTP request open causes Fly proxy 503s.
+    """
+    async def _run():
+        try:
+            result = await agent.run_cycle(trigger=f"manual:{trigger}")
+            await ws_manager.broadcast({"type": "manual_cycle", "data": result})
+        except Exception as exc:
+            logger.exception(f"[AGENT] Background cycle failed: {exc}")
+            await ws_manager.broadcast({"type": "agent_error", "data": {"error": str(exc)}})
+
+    asyncio.create_task(_run())
+    return {"status": "accepted", "message": "Cycle started — result will arrive via WebSocket"}
 
 
 @app.get("/agent/stream")
@@ -581,9 +616,9 @@ async def get_research_feed(category: str = "all"):
     async def fetch_channel(ch: dict) -> list[dict]:
         url = f"https://www.youtube.com/feeds/videos.xml?channel_id={ch['id']}"
         try:
-            async with httpx.AsyncClient(timeout=8) as client:
-                r = await client.get(url)
-                if not r.ok:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                r = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; NVCBot/1.0)"})
+                if r.status_code != 200:
                     return []
             root = ET.fromstring(r.text)
             videos = []
@@ -649,10 +684,31 @@ async def get_settings():
 async def websocket_endpoint(websocket: WebSocket):
     await ws_manager.connect(websocket)
     try:
+        # Send current state immediately on connect — client shouldn't wait for next cycle
+        from core.bridge.oanda_client import OandaClient
+        oanda = OandaClient()
+        account_data, positions_data = await asyncio.gather(
+            oanda.get_account_info(),
+            oanda.get_positions(),
+            return_exceptions=True,
+        )
+        if not isinstance(account_data, Exception):
+            await websocket.send_text(json.dumps({
+                "type": "account_update", "data": account_data
+            }, default=str))
+        if not isinstance(positions_data, Exception):
+            await websocket.send_text(json.dumps({
+                "type": "positions_update", "data": {"positions": positions_data}
+            }, default=str))
+
+        # Keep-alive loop — handles ping/pong and stays open
         while True:
             data = await websocket.receive_text()
             msg = json.loads(data)
             if msg.get("type") == "ping":
                 await websocket.send_text(json.dumps({"type": "pong"}))
     except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+    except Exception as exc:
+        logger.warning(f"[WS] Connection error: {exc}")
         ws_manager.disconnect(websocket)

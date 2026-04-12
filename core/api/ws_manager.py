@@ -18,6 +18,9 @@ class WSManager:
         self._connections.remove(websocket)
         logger.debug(f"[WS] Client disconnected. Total: {len(self._connections)}")
 
+    def has_connections(self) -> bool:
+        return len(self._connections) > 0
+
     async def broadcast(self, data: dict) -> None:
         if not self._connections:
             return
