@@ -15,8 +15,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# spaCy model
-RUN python -m spacy download en_core_web_lg
+# spaCy model is installed via requirements.txt (pip URL) — no CLI step needed
 
 # Pre-download FinBERT model to persistent volume path
 ENV TRANSFORMERS_CACHE=/app/.cache/huggingface
