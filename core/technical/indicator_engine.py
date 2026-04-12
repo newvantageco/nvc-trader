@@ -237,19 +237,30 @@ class IndicatorEngine:
 
     async def _get_ohlcv(self, instrument: str, timeframe: str) -> pd.DataFrame:
         """
-        Fetch OHLCV data. In production: pulls from MT5 Python API or Alpha Vantage.
-        Falls back to Yahoo Finance for dev/testing.
+        Fetch OHLCV data.
+        Primary: OANDA REST candles API (live instrument-accurate data).
+        Fallback: Yahoo Finance (free, slightly delayed, good enough for M1H+).
+        Raises RuntimeError if both fail — never returns synthetic data.
         """
+        # ── Primary: OANDA candles ────────────────────────────────────────────
+        try:
+            df = await self._fetch_oanda_candles(instrument, timeframe)
+            if df is not None and len(df) >= 50:
+                return df
+        except Exception as exc:
+            logger.warning(f"[OHLCV] OANDA candles failed for {instrument} {timeframe}: {exc}")
+
+        # ── Fallback: yfinance ─────────────────────────────────────────────────
         try:
             import yfinance as yf
             tf_map = {"M15": "15m", "H1": "1h", "H4": "4h", "D1": "1d"}
             period_map = {"M15": "5d", "H1": "60d", "H4": "180d", "D1": "365d"}
             sym_map = {
                 "EURUSD": "EURUSD=X", "GBPUSD": "GBPUSD=X", "USDJPY": "JPY=X",
-                "AUDUSD": "AUDUSD=X", "USDCAD": "CAD=X", "NZDUSD": "NZDUSD=X",
-                "USDCHF": "CHF=X", "EURJPY": "EURJPY=X", "GBPJPY": "GBPJPY=X",
-                "XAUUSD": "GC=F", "XAGUSD": "SI=F", "USOIL": "CL=F",
-                "UKOIL": "BZ=F", "NATGAS": "NG=F",
+                "AUDUSD": "AUDUSD=X", "USDCAD": "CAD=X",    "NZDUSD": "NZDUSD=X",
+                "USDCHF": "CHF=X",    "EURJPY": "EURJPY=X", "GBPJPY": "GBPJPY=X",
+                "XAUUSD": "GC=F",     "XAGUSD": "SI=F",     "USOIL":  "CL=F",
+                "UKOIL":  "BZ=F",     "NATGAS": "NG=F",
             }
             ticker = sym_map.get(instrument, f"{instrument}=X")
             df = yf.download(
@@ -259,21 +270,62 @@ class IndicatorEngine:
                 progress=False,
                 auto_adjust=True,
             )
-            df.columns = [c.lower() for c in df.columns]
-            return df.dropna()
+            if df is not None and len(df) >= 50:
+                df.columns = [c.lower() for c in df.columns]
+                logger.info(f"[OHLCV] yfinance fallback used for {instrument} {timeframe}")
+                return df.dropna()
         except Exception as exc:
-            logger.warning(f"[OHLCV] yfinance failed for {instrument} {timeframe}: {exc}")
-            # Return synthetic data for testing
-            return self._synthetic_ohlcv()
+            logger.error(f"[OHLCV] yfinance also failed for {instrument} {timeframe}: {exc}")
 
-    @staticmethod
-    def _synthetic_ohlcv(n: int = 300) -> pd.DataFrame:
-        np.random.seed(42)
-        prices = 1.09 + np.cumsum(np.random.randn(n) * 0.001)
-        return pd.DataFrame({
-            "open": prices,
-            "high": prices + np.abs(np.random.randn(n) * 0.002),
-            "low": prices - np.abs(np.random.randn(n) * 0.002),
-            "close": prices + np.random.randn(n) * 0.0005,
-            "volume": np.random.randint(1000, 10000, n).astype(float),
-        })
+        # ── Both failed — refuse to trade on fake data ─────────────────────────
+        raise RuntimeError(
+            f"No OHLCV data available for {instrument} {timeframe} — "
+            f"OANDA and yfinance both failed. Refusing to use synthetic data."
+        )
+
+    async def _fetch_oanda_candles(self, instrument: str, timeframe: str) -> pd.DataFrame | None:
+        """Fetch candles directly from OANDA REST API."""
+        import os, httpx
+        api_key    = os.environ.get("OANDA_API_KEY", "")
+        account_id = os.environ.get("OANDA_ACCOUNT_ID", "")
+        is_live    = os.environ.get("OANDA_LIVE", "false").lower() == "true"
+
+        if not api_key or not account_id:
+            return None  # Not configured — fall through to yfinance
+
+        base_url = "https://api-fxtrade.oanda.com" if is_live else "https://api-fxpractice.oanda.com"
+
+        # OANDA granularity mapping
+        gran_map = {"M15": "M15", "H1": "H1", "H4": "H4", "D1": "D"}
+        count_map = {"M15": 400, "H1": 500, "H4": 400, "D1": 365}
+
+        from core.bridge.oanda_client import INSTRUMENT_MAP
+        oanda_sym = INSTRUMENT_MAP.get(instrument, instrument.replace("USD", "_USD"))
+        granularity = gran_map.get(timeframe, "H1")
+        count       = count_map.get(timeframe, 500)
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                f"{base_url}/v3/instruments/{oanda_sym}/candles",
+                headers={"Authorization": f"Bearer {api_key}"},
+                params={"granularity": granularity, "count": count, "price": "M"},
+            )
+            r.raise_for_status()
+            candles = r.json().get("candles", [])
+
+        if not candles:
+            return None
+
+        rows = []
+        for c in candles:
+            if c.get("complete", True):
+                m = c["mid"]
+                rows.append({
+                    "open":   float(m["o"]),
+                    "high":   float(m["h"]),
+                    "low":    float(m["l"]),
+                    "close":  float(m["c"]),
+                    "volume": float(c.get("volume", 0)),
+                })
+
+        return pd.DataFrame(rows) if rows else None

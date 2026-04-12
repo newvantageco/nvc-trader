@@ -29,14 +29,48 @@ db = SupabaseClient()
 agent = VantageAgent()
 
 
+def _validate_env() -> None:
+    """
+    P0: Crash hard at startup if critical env vars are missing.
+    Silent mock fallback in production would execute trades against fake data.
+    """
+    missing: list[str] = []
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        missing.append("ANTHROPIC_API_KEY")
+
+    is_live = os.environ.get("OANDA_LIVE", "false").lower() == "true"
+    if is_live:
+        if not os.environ.get("OANDA_API_KEY"):
+            missing.append("OANDA_API_KEY")
+        if not os.environ.get("OANDA_ACCOUNT_ID"):
+            missing.append("OANDA_ACCOUNT_ID")
+
+    if missing:
+        msg = (
+            f"[STARTUP] FATAL — missing required env vars: {', '.join(missing)}\n"
+            f"  OANDA_LIVE={'true' if is_live else 'false'}\n"
+            f"  Set these vars and restart. Refusing to start with missing credentials."
+        )
+        logger.critical(msg)
+        raise RuntimeError(msg)
+
+    logger.info(
+        f"[STARTUP] Env validation passed — "
+        f"OANDA mode={'LIVE' if is_live else 'demo/practice'}"
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
+    # Startup — validate env before anything else
+    _validate_env()
     logger.info("[API] NVC Core Engine starting...")
     scheduler.add_job(run_scheduled_cycle, "cron", minute="*/15")   # Every 15 min
     scheduler.add_job(run_news_scan, "cron", minute="*/2")           # News scan every 2 min
+    scheduler.add_job(run_account_snapshot, "cron", minute=0)        # Hourly snapshots (P0)
     scheduler.start()
-    logger.info("[API] Scheduler started — agent runs every 15 minutes")
+    logger.info("[API] Scheduler started — agent 15min | news 2min | snapshots hourly")
     yield
     # Shutdown
     scheduler.shutdown()
@@ -67,20 +101,78 @@ async def run_scheduled_cycle():
     await ws_manager.broadcast({"type": "cycle_complete", "data": result})
 
 
+HIGH_IMPACT_KEYWORDS = [
+    "rate decision", "nfp", "cpi", "inflation", "fed", "ecb", "opec",
+    "war", "sanctions", "recession", "rate hike", "rate cut", "gdp",
+    "unemployment", "boe", "bank of japan", "boj", "rba", "fomc",
+]
+
+
 async def run_news_scan():
-    """Quick news scan — trigger full cycle if breaking news detected."""
+    """
+    Quick news scan every 2 minutes.
+    Writes all new articles to news_events table (the table exists but was never populated).
+    Triggers a full agent cycle if a high-impact event is detected.
+    """
     from core.ingestion.news_fetcher import NewsFetcher
-    fetcher = NewsFetcher()
+    fetcher  = NewsFetcher()
     breaking = await fetcher.fetch_breaking_news(minutes=5)
+
+    # Write all breaking articles to news_events (previously an empty table)
+    for article in breaking[:20]:  # cap at 20 to avoid DB spam
+        try:
+            await db.insert("news_events", {
+                "title":        article.get("title", "")[:500],
+                "source":       article.get("source", ""),
+                "url":          article.get("url", "")[:1000],
+                "published_at": article["published_at"].isoformat()
+                                if hasattr(article.get("published_at"), "isoformat")
+                                else str(article.get("published_at", "")),
+                "weight":       article.get("weight", 0.7),
+                "fetched_at":   datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception:
+            pass  # DB errors in news logging are non-fatal
+
     if breaking:
         high_impact = [a for a in breaking if any(
-            kw in a["title"].lower() for kw in
-            ["rate decision", "nfp", "cpi", "inflation", "fed", "ecb", "opec", "war", "sanctions"]
+            kw in a["title"].lower() for kw in HIGH_IMPACT_KEYWORDS
         )]
         if high_impact:
             logger.info(f"[NEWS SCAN] Breaking news detected: {high_impact[0]['title']}")
             result = await agent.run_cycle(trigger=f"breaking:{high_impact[0]['title'][:60]}")
             await ws_manager.broadcast({"type": "breaking_news_cycle", "data": result})
+
+
+async def run_account_snapshot():
+    """
+    P0-2: Write hourly account snapshot to Supabase.
+    Required for accurate drawdown tracking — without this, restarts lose all history.
+    """
+    try:
+        from core.bridge.oanda_client import OandaClient
+        oanda   = OandaClient()
+        account = await oanda.get_account_info()
+        snapshot = {
+            "timestamp":        datetime.now(timezone.utc).isoformat(),
+            "balance":          account.get("balance", 0),
+            "equity":           account.get("equity", 0),
+            "margin_used":      account.get("margin", 0),
+            "free_margin":      account.get("free_margin", 0),
+            "unrealised_pl":    account.get("unrealised_pl", 0),
+            "daily_drawdown":   account.get("daily_drawdown_pct", 0),
+            "weekly_drawdown":  account.get("weekly_drawdown_pct", 0),
+            "monthly_drawdown": account.get("monthly_drawdown_pct", 0),
+            "system_status":    account.get("system_status", "unknown"),
+        }
+        await db.insert("account_snapshots", snapshot)
+        logger.info(
+            f"[SNAPSHOT] Hourly snapshot written — "
+            f"equity=${snapshot['equity']:,.2f} | margin={snapshot['margin_used']:,.2f}"
+        )
+        await ws_manager.broadcast({"type": "account_snapshot", "data": snapshot})
+    except Exception as exc:
+        logger.error(f"[SNAPSHOT] Failed to write account snapshot: {exc}")
 
 
 # ─── REST Endpoints ────────────────────────────────────────────────────────────

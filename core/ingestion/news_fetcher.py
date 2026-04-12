@@ -108,11 +108,23 @@ class NewsFetcher:
 
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
         articles = [a for a in articles if a["published_at"] > cutoff]
-        articles.sort(key=lambda x: x["published_at"], reverse=True)
 
-        self._cache[cache_key] = articles
+        # Deduplicate by URL — same story syndicated from multiple feeds counts once.
+        # If URL is missing, fall back to normalised title (lowercase, stripped).
+        seen: set[str] = set()
+        deduped: list[dict] = []
+        for article in articles:
+            key = article.get("url") or article.get("title", "").lower().strip()
+            if key and key not in seen:
+                seen.add(key)
+                deduped.append(article)
+
+        deduped.sort(key=lambda x: x["published_at"], reverse=True)
+
+        self._cache[cache_key] = deduped
         self._last_fetch[cache_key] = datetime.now(timezone.utc)
-        return articles
+        logger.debug(f"[NEWS] Fetched {len(articles)} articles, {len(deduped)} after dedup (from {hours:.1f}h window)")
+        return deduped
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def _fetch_rss(self, source_name: str, url: str) -> list[dict]:

@@ -280,17 +280,39 @@ class VantageAgent:
             "expiry": None,
         }
 
-        # Send to MT5 via ZeroMQ
+        # Send to OANDA — wait for full ACK before marking anything FILLED
         fill = await self.zmq.send_signal(signal)
 
-        # Persist to DB
-        await self.db.insert("signals", {**signal, "fill": fill, "agent": "claude-vantage"})
+        # P0-3: Only accept FILLED status when OANDA confirms with a real ticket.
+        # dry_run has no ticket risk; any non-FILLED status means the order did NOT execute.
+        ack_status = fill.get("status")
+        if ack_status == "FILLED":
+            is_dry_run = fill.get("mode") == "dry_run"
+            ticket     = fill.get("ticket")
 
-        logger.success(
-            f"[TRADE EXECUTED] {direction} {instrument} "
-            f"lot={validated_lot['lot_size']} score={score:.2f} fill={fill}"
+            if not is_dry_run and not ticket:
+                # OANDA said FILLED but gave no ticket — treat as unconfirmed
+                logger.error(
+                    f"[TRADE ACK] OANDA returned FILLED but no ticket — rejecting to prevent double-execute. "
+                    f"instrument={instrument} fill={fill}"
+                )
+                return {"status": "UNCONFIRMED", "reason": "OANDA FILLED but no ticket in response", "fill": fill}
+
+            # Only persist to DB once we have confirmed ACK
+            await self.db.insert("signals", {**signal, "fill": fill, "agent": "claude-vantage"})
+            logger.success(
+                f"[TRADE CONFIRMED] {direction} {instrument} "
+                f"lot={validated_lot['lot_size']} score={score:.2f} "
+                f"ticket={ticket} {'[DRY-RUN]' if is_dry_run else '[LIVE]'}"
+            )
+            return {"status": "FILLED", **fill, "signal": signal}
+
+        # Order was rejected/cancelled/failed by broker — do NOT persist as FILLED
+        logger.warning(
+            f"[TRADE NOT FILLED] {direction} {instrument} "
+            f"status={ack_status} reason={fill.get('reason', 'unknown')}"
         )
-        return {"status": "FILLED", **fill, "signal": signal}
+        return fill
 
     async def _tool_close_position(self, ticket: int, reason: str) -> dict:
         result = await self.zmq.close_position(ticket, reason)
@@ -459,8 +481,10 @@ class VantageAgent:
     async def _refresh_state(self) -> None:
         """Pull fresh account and position data before each cycle."""
         self._account_metrics = await self.zmq.get_account_info()
-        self._open_positions = await self.zmq.get_positions()
+        self._open_positions  = await self.zmq.get_positions()
         self.circuit_breaker.update(self._account_metrics)
+        # Load real drawdown from DB snapshots — OANDA's reported value is always 0
+        await self.circuit_breaker.load_drawdown_from_db(self.db)
 
     def _build_context_message(self, trigger: str) -> str:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -495,13 +519,40 @@ class VantageAgent:
         messages: list,
     ) -> None:
         try:
+            # Count tool calls per tool from the message history
+            tool_calls: dict[str, int] = {}
+            for msg in messages:
+                content = msg.get("content", [])
+                if isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "tool_use":
+                            name = block.get("name", "unknown")
+                            tool_calls[name] = tool_calls.get(name, 0) + 1
+                        elif hasattr(block, "type") and block.type == "tool_use":
+                            name = getattr(block, "name", "unknown")
+                            tool_calls[name] = tool_calls.get(name, 0) + 1
+
+            # Extract final reasoning text (last assistant message)
+            summary = ""
+            for msg in reversed(messages):
+                if msg.get("role") == "assistant":
+                    content = msg.get("content", [])
+                    if isinstance(content, list):
+                        texts = [b.text for b in content if hasattr(b, "text") and b.text]
+                        if texts:
+                            summary = " ".join(texts)[:1000]
+                            break
+
             await self.db.insert("agent_cycles", {
-                "cycle_id": cycle_id,
-                "trigger": trigger,
+                "cycle_id":        cycle_id,
+                "trigger":         trigger,
                 "trades_executed": len(trades),
-                "trades": json.dumps(trades),
-                "message_count": len(messages),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "trades":          json.dumps(trades, default=str),
+                "message_count":   len(messages),
+                "tool_calls":      json.dumps(tool_calls),
+                "summary":         summary,
+                "circuit_breaker": json.dumps(self.circuit_breaker.status()),
+                "timestamp":       datetime.now(timezone.utc).isoformat(),
             })
         except Exception as exc:
             logger.warning(f"[DB] Failed to log cycle: {exc}")

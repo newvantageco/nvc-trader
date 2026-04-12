@@ -31,7 +31,13 @@ class SupabaseClient:
             logger.error(f"[DB] Insert failed on {table}: {exc}")
             return None
 
-    async def select(self, table: str, filters: dict | None = None) -> list[dict]:
+    async def select(
+        self,
+        table: str,
+        filters: dict | None = None,
+        order_by: str | None = None,   # column name; prefix with "-" for DESC
+        limit: int | None = None,
+    ) -> list[dict]:
         if not self._client:
             return []
         try:
@@ -39,11 +45,31 @@ class SupabaseClient:
             if filters:
                 for k, v in filters.items():
                     query = query.eq(k, v)
+            if order_by:
+                descending = order_by.startswith("-")
+                col = order_by.lstrip("-")
+                query = query.order(col, desc=descending)
+            if limit:
+                query = query.limit(limit)
             result = query.execute()
             return result.data or []
         except Exception as exc:
             logger.error(f"[DB] Select failed on {table}: {exc}")
             return []
+
+    async def delete(self, table: str, filters: dict) -> bool:
+        if not self._client:
+            logger.debug(f"[DB DRY-RUN] DELETE {table}: {filters}")
+            return True
+        try:
+            query = self._client.table(table)
+            for k, v in filters.items():
+                query = query.eq(k, v)
+            query.delete().execute()
+            return True
+        except Exception as exc:
+            logger.error(f"[DB] Delete failed on {table}: {exc}")
+            return False
 
     async def update(self, table: str, filters: dict, data: dict) -> dict | None:
         if not self._client:

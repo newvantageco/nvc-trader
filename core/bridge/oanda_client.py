@@ -25,6 +25,16 @@ INSTRUMENT_MAP = {
 OANDA_PRACTICE_URL = "https://api-fxpractice.oanda.com"
 OANDA_LIVE_URL     = "https://api-fxtrade.oanda.com"
 
+# Approximate mid prices for dry-run/test mode — kept intentionally rough
+# (1-pip precision is enough; these are never used for real P&L)
+DRY_RUN_PRICES: dict[str, float] = {
+    "EURUSD": 1.0850, "GBPUSD": 1.2700, "USDJPY": 149.50,
+    "AUDUSD": 0.6550, "USDCAD": 1.3600, "NZDUSD": 0.6050,
+    "USDCHF": 0.9050, "EURJPY": 162.00, "GBPJPY": 190.00,
+    "XAUUSD": 2320.0, "XAGUSD": 27.50,
+    "USOIL": 78.50,   "UKOIL": 82.00,   "NATGAS": 1.75,
+}
+
 
 class OandaClient:
     """
@@ -168,11 +178,12 @@ class OandaClient:
             }
 
         if not self._is_configured():
-            logger.info(f"[OANDA DRY-RUN] Would execute: {direction} {lot_size} {instrument}")
+            mid = DRY_RUN_PRICES.get(instrument, 1.09000)
+            logger.info(f"[OANDA DRY-RUN] Would execute: {direction} {lot_size} {instrument} @ ~{mid}")
             return {
                 "status": "FILLED",
                 "ticket": 99999999,
-                "fill_price": 1.09000,
+                "fill_price": mid,
                 "fill_time": datetime.now(timezone.utc).isoformat(),
                 "mode": "dry_run",
             }
@@ -262,7 +273,8 @@ class OandaClient:
     async def get_price(self, instrument: str) -> dict:
         oanda_instrument = INSTRUMENT_MAP.get(instrument, instrument)
         if not self._is_configured():
-            return {"bid": 1.09000, "ask": 1.09003, "spread": 0.3}
+            mid = DRY_RUN_PRICES.get(instrument, 1.09000)
+            return {"bid": mid - 0.00015, "ask": mid + 0.00015, "spread": 0.3}
         try:
             async with httpx.AsyncClient(timeout=5) as client:
                 r = await client.get(
@@ -297,11 +309,13 @@ class OandaClient:
 
     @staticmethod
     def _mock_account() -> dict:
+        # $100 demo account — NOT 100k. Using wrong value breaks Kelly sizing,
+        # drawdown %, and every risk calculation downstream.
         return {
-            "balance": 100_000.0,
-            "equity": 100_000.0,
+            "balance": 100.0,
+            "equity": 100.0,
             "margin": 0.0,
-            "free_margin": 100_000.0,
+            "free_margin": 100.0,
             "unrealised_pl": 0.0,
             "daily_drawdown_pct": 0.0,
             "weekly_drawdown_pct": 0.0,

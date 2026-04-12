@@ -63,6 +63,14 @@ class VantageStreamingAgent:
         positions = await self.oanda.get_positions()
         self.circuit_breaker.update(account)
 
+        # Pre-load shared agent with current state so tools use live data
+        from core.ai.claude_agent import VantageAgent
+        self._agent = VantageAgent()
+        self._agent._open_positions  = positions
+        self._agent._account_metrics = account
+        # Load real drawdown from DB — circuit breaker relies on this
+        await self._agent.circuit_breaker.load_drawdown_from_db(self._agent.db)
+
         yield _evt("status", {
             "message": f"Account loaded — equity ${account.get('equity', 0):,.2f} | {len(positions)} open positions",
             "phase": "state_loaded",
@@ -90,13 +98,24 @@ class VantageStreamingAgent:
             iterations += 1
             yield _evt("status", {"message": f"Thinking... (step {iterations})", "phase": "thinking"})
 
-            response = self.client.messages.create(
-                model="claude-opus-4-6",
-                max_tokens=8096,
-                system=TRADING_AGENT_SYSTEM_PROMPT,
-                tools=TRADING_TOOLS,
-                messages=messages,
-            )
+            # P0-4: Wrap Claude API call — a network or auth failure must yield an error
+            # event and halt gracefully, not crash the SSE generator silently.
+            try:
+                response = self.client.messages.create(
+                    model="claude-opus-4-6",
+                    max_tokens=8096,
+                    system=TRADING_AGENT_SYSTEM_PROMPT,
+                    tools=TRADING_TOOLS,
+                    messages=messages,
+                )
+            except Exception as api_exc:
+                yield _evt("error", {
+                    "message": f"Claude API call failed at step {iterations}: {api_exc}",
+                    "phase":   "api_error",
+                    "fatal":   True,
+                })
+                logger.error(f"[STREAMING] Claude API error at step {iterations}: {api_exc}")
+                return
 
             messages.append({"role": "assistant", "content": response.content})
 
@@ -135,7 +154,28 @@ class VantageStreamingAgent:
                     "step":   iterations,
                 })
 
-                result = await self._dispatch_tool(block.name, block.input)
+                # P0-4: Tool errors must surface as error events, not crash the generator.
+                # Return an error dict so Claude sees "this tool failed" and can decide
+                # what to do — rather than receiving stale/empty data silently.
+                try:
+                    result = await self._dispatch_tool(block.name, block.input)
+                except Exception as tool_exc:
+                    result = {"error": str(tool_exc), "tool": block.name}
+                    yield _evt("error", {
+                        "message": f"Tool {block.name} raised exception: {tool_exc}",
+                        "tool":    block.name,
+                        "step":    iterations,
+                        "fatal":   False,
+                    })
+                    logger.error(f"[STREAMING] Tool {block.name} exception: {tool_exc}")
+
+                if "error" in result:
+                    yield _evt("error", {
+                        "message": f"Tool {block.name} returned error: {result['error']}",
+                        "tool":    block.name,
+                        "step":    iterations,
+                        "fatal":   False,
+                    })
 
                 # Enrich stream for key tools
                 if block.name == "get_news_sentiment":
@@ -198,12 +238,13 @@ class VantageStreamingAgent:
         })
 
     async def _dispatch_tool(self, name: str, inputs: dict) -> dict:
-        """Mirrors VantageAgent._dispatch_tool."""
-        from core.ai.claude_agent import VantageAgent
-        agent = VantageAgent()
-        agent._open_positions = await self.oanda.get_positions()
-        agent._account_metrics = await self.oanda.get_account_info()
-        return await agent._dispatch_tool(name, inputs)
+        """Route tool calls via VantageAgent (shared instance — reuse cached state)."""
+        if not hasattr(self, "_agent"):
+            from core.ai.claude_agent import VantageAgent
+            self._agent = VantageAgent()
+        # Refresh positions + metrics once per iteration (not per tool call)
+        # They're already fetched at cycle start; individual calls use the cache.
+        return await self._agent._dispatch_tool(name, inputs)
 
     def _build_context(self, trigger: str, account: dict, positions: list) -> str:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")

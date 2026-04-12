@@ -4,17 +4,13 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # System dependencies
+# TA-Lib C build removed — ta-lib>=0.6 ships a self-contained manylinux wheel
+# that bundles the C library, so no source compile needed.
 RUN apt-get update && apt-get install -y \
-    build-essential wget curl libzmq3-dev git \
+    build-essential curl libzmq3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# TA-Lib C library — use GitHub mirror (sourceforge is unreliable in CI)
-RUN wget -q https://github.com/ta-lib/ta-lib/releases/download/v0.4.0/ta-lib-0.4.0-src.tar.gz && \
-    tar xzf ta-lib-0.4.0-src.tar.gz && \
-    cd ta-lib && ./configure --prefix=/usr && make -j2 && make install && \
-    cd .. && rm -rf ta-lib* && ldconfig
-
-# Python deps — split for better layer caching
+# Python deps
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt

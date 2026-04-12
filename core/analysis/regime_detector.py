@@ -195,6 +195,8 @@ class RegimeDetector:
 
     @staticmethod
     def _default_regime(instrument: str) -> dict:
+        # tradeable=False: we have no data. A 0.30 confidence RANGING assumption
+        # is not enough to risk capital — edge filter will block via regime condition.
         return {
             "instrument":     instrument,
             "regime":         "RANGING",
@@ -204,10 +206,10 @@ class RegimeDetector:
             "atr":            0.0,
             "atr_ratio":      1.0,
             "ema_aligned":    False,
-            "trend_strength": 0.3,
-            "tradeable":      True,
-            "strategy_hint":  "No data — default to RANGING approach",
-            "confidence":     0.30,
+            "trend_strength": 0.0,
+            "tradeable":      False,
+            "strategy_hint":  "No data — regime unknown, refusing to trade",
+            "confidence":     0.0,
         }
 
     # ── Multi-instrument scan ─────────────────────────────────────────────────
