@@ -23,8 +23,15 @@ export interface Position {
 export interface AccountMetrics {
   equity: number
   balance: number
+  margin: number
+  free_margin: number
+  unrealised_pl: number
   daily_drawdown_pct: number
+  weekly_drawdown_pct: number
+  monthly_drawdown_pct: number
+  currency: string
   system_status: string
+  broker: string
 }
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info'
