@@ -2,7 +2,7 @@
 # App: nvc-trader-engine
 # fly deploy  (from repo root)
 
-app = "nvc-trader-engine"
+app = "nvc-trader"
 primary_region = "lhr"    # London — closest to EU/UK markets
 
 [build]
@@ -29,14 +29,12 @@ primary_region = "lhr"    # London — closest to EU/UK markets
   size   = "performance-2x"   # 2 vCPU, 4GB RAM — needed for FinBERT model
   memory = "4096"
 
-[checks]
-  [checks.health]
-    grace_period = "60s"     # time for FinBERT to load
-    interval     = "30s"
-    method       = "GET"
-    path         = "/health"
-    port         = 8000
-    timeout      = "10s"
+[[http_service.checks]]
+  grace_period = "60s"     # time for FinBERT to load
+  interval     = "30s"
+  method       = "GET"
+  path         = "/health"
+  timeout      = "10s"
 
 # Persistent volume for FinBERT model cache (avoid re-downloading)
 [[mounts]]
