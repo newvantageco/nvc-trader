@@ -1,0 +1,46 @@
+# Frontend — never needed in the backend container
+dashboard/
+
+# Git
+.git/
+.gitignore
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Model cache — downloaded at build time into the image
+.cache/
+
+# Dev / editor
+.env
+.env.*
+*.local
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Docs
+*.md
+docs/
