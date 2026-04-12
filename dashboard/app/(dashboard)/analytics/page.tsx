@@ -13,14 +13,20 @@ interface Metrics {
   winning_trades: number
   losing_trades: number
   win_rate: number
-  total_pnl: number
-  avg_win: number
-  avg_loss: number
+  net_pnl_usd: number
+  avg_win_usd: number
+  avg_loss_usd: number
   profit_factor: number
   sharpe_ratio: number
-  max_drawdown_pct: number
+  expectancy_per_trade: number
+  max_consecutive_losses: number
+  kelly_fraction: number
+  recommended_risk_pct: number
+  best_instrument: string | null
+  worst_instrument: string | null
+  assessment: string
   total_signals: number
-  by_instrument: Record<string, { trades: number; pnl: number; win_rate: number }>
+  by_instrument: Record<string, { trades: number; total_pnl: number; win_rate: number; trade_count: number }>
 }
 
 interface Snapshot {
@@ -114,10 +120,11 @@ export default function AnalyticsPage() {
 
   useEffect(() => { loadData() }, [loadData])
 
-  const wr = metrics?.win_rate ? (metrics.win_rate * 100).toFixed(1) : '—'
-  const pf = metrics?.profit_factor?.toFixed(2) ?? '—'
-  const sr = metrics?.sharpe_ratio?.toFixed(2) ?? '—'
-  const dd = metrics?.max_drawdown_pct?.toFixed(2) ?? '—'
+  const wr  = metrics?.win_rate ? (metrics.win_rate * 100).toFixed(1) : '—'
+  const pf  = metrics?.profit_factor?.toFixed(2) ?? '—'
+  const sr  = metrics?.sharpe_ratio?.toFixed(2) ?? '—'
+  const exp = metrics?.expectancy_per_trade != null ? `$${metrics.expectancy_per_trade.toFixed(2)}` : '—'
+  const kly = metrics?.kelly_fraction != null ? (metrics.kelly_fraction * 100).toFixed(1) : '—'
 
   return (
     <div className="flex flex-col h-full overflow-auto" style={{ background: 'var(--bg-base)' }}>
@@ -189,15 +196,27 @@ export default function AnalyticsPage() {
             Performance Metrics
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <StatCard loading={loading} label="WIN RATE"      value={`${wr}%`}       sub={`${metrics?.winning_trades || 0}W / ${metrics?.losing_trades || 0}L`} color={parseFloat(wr) > 50 ? 'var(--bull)' : 'var(--bear)'} />
-            <StatCard loading={loading} label="PROFIT FACTOR" value={pf}             sub="target >1.5" color={parseFloat(pf) > 1.5 ? 'var(--bull)' : 'var(--accent)'} />
-            <StatCard loading={loading} label="SHARPE RATIO"  value={sr}             sub="annualised"  color={parseFloat(sr) > 1 ? 'var(--bull)' : 'var(--accent)'} />
-            <StatCard loading={loading} label="MAX DRAWDOWN"  value={`-${dd}%`}      sub="from peak"   color="var(--bear)" />
-            <StatCard loading={loading} label="TOTAL P&L"     value={`$${(metrics?.total_pnl || 0).toFixed(2)}`} color={(metrics?.total_pnl || 0) >= 0 ? 'var(--bull)' : 'var(--bear)'} />
-            <StatCard loading={loading} label="AVG WIN"       value={`$${(metrics?.avg_win || 0).toFixed(2)}`}   color="var(--bull)" />
-            <StatCard loading={loading} label="AVG LOSS"      value={`$${(metrics?.avg_loss || 0).toFixed(2)}`}  color="var(--bear)" />
-            <StatCard loading={loading} label="TOTAL SIGNALS" value={String(metrics?.total_signals || 0)} sub="all generated" />
+            <StatCard loading={loading} label="WIN RATE"        value={`${wr}%`}  sub={`${metrics?.winning_trades || 0}W / ${metrics?.losing_trades || 0}L`} color={parseFloat(wr) > 50 ? 'var(--bull)' : 'var(--bear)'} />
+            <StatCard loading={loading} label="PROFIT FACTOR"   value={pf}        sub="target >1.5" color={parseFloat(pf) > 1.5 ? 'var(--bull)' : 'var(--accent)'} />
+            <StatCard loading={loading} label="SHARPE RATIO"    value={sr}        sub="annualised"  color={parseFloat(sr) > 1 ? 'var(--bull)' : 'var(--accent)'} />
+            <StatCard loading={loading} label="EXPECTANCY"      value={exp}       sub="per trade"   color={(metrics?.expectancy_per_trade || 0) > 0 ? 'var(--bull)' : 'var(--bear)'} />
+            <StatCard loading={loading} label="NET P&L"         value={`$${(metrics?.net_pnl_usd || 0).toFixed(2)}`} color={(metrics?.net_pnl_usd || 0) >= 0 ? 'var(--bull)' : 'var(--bear)'} />
+            <StatCard loading={loading} label="AVG WIN"         value={`$${(metrics?.avg_win_usd || 0).toFixed(2)}`} color="var(--bull)" />
+            <StatCard loading={loading} label="AVG LOSS"        value={`$${(metrics?.avg_loss_usd || 0).toFixed(2)}`} color="var(--bear)" />
+            <StatCard loading={loading} label="KELLY FRACTION"  value={`${kly}%`} sub={`rec. ${metrics?.recommended_risk_pct?.toFixed(2) || '1.00'}% risk`} color="var(--accent)" />
+            <StatCard loading={loading} label="MAX CONSEC LOSS" value={String(metrics?.max_consecutive_losses || 0)} sub="reduce size at 3+" color={(metrics?.max_consecutive_losses || 0) >= 3 ? 'var(--bear)' : 'var(--text-primary)'} />
+            <StatCard loading={loading} label="BEST PAIR"       value={metrics?.best_instrument || '—'}  color="var(--bull)" />
+            <StatCard loading={loading} label="WORST PAIR"      value={metrics?.worst_instrument || '—'} color="var(--bear)" />
+            <StatCard loading={loading} label="TOTAL SIGNALS"   value={String(metrics?.total_signals || 0)} sub="all generated" />
           </div>
+
+          {/* Assessment banner */}
+          {!loading && metrics?.assessment && (
+            <div className="mt-3 px-4 py-3 rounded border text-xs font-mono"
+                 style={{ borderColor: 'var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+              {metrics.assessment}
+            </div>
+          )}
         </div>
 
         {/* Per-instrument */}
@@ -218,18 +237,18 @@ export default function AnalyticsPage() {
               </thead>
               <tbody>
                 {Object.entries(metrics.by_instrument)
-                  .sort(([, a], [, b]) => b.pnl - a.pnl)
+                  .sort(([, a], [, b]) => b.total_pnl - a.total_pnl)
                   .map(([sym, d]) => (
                   <tr key={sym} className="border-b" style={{ borderColor: 'var(--border)' }}>
                     <td className="py-2 pr-6 font-semibold" style={{ color: 'var(--text-primary)' }}>{sym}</td>
-                    <td className="py-2 pr-6 text-right" style={{ color: 'var(--text-secondary)' }}>{d.trades}</td>
+                    <td className="py-2 pr-6 text-right" style={{ color: 'var(--text-secondary)' }}>{d.trade_count}</td>
                     <td className="py-2 pr-6 text-right"
                         style={{ color: d.win_rate > 0.5 ? 'var(--bull)' : 'var(--bear)' }}>
                       {(d.win_rate * 100).toFixed(0)}%
                     </td>
                     <td className="py-2 text-right font-semibold"
-                        style={{ color: d.pnl >= 0 ? 'var(--bull)' : 'var(--bear)' }}>
-                      {d.pnl >= 0 ? '+' : ''}${d.pnl.toFixed(2)}
+                        style={{ color: d.total_pnl >= 0 ? 'var(--bull)' : 'var(--bear)' }}>
+                      {d.total_pnl >= 0 ? '+' : ''}${d.total_pnl.toFixed(2)}
                     </td>
                   </tr>
                 ))}

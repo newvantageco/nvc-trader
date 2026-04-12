@@ -46,6 +46,7 @@ from core.execution.smart_executor import SmartExecutor
 from core.planning.portfolio_optimizer import PortfolioOptimizer
 from core.analysis.regime_detector import RegimeDetector
 from core.signals.edge_filter import EdgeFilter
+from core.analysis.performance_tracker import PerformanceTracker
 
 
 WATCHLIST = [
@@ -79,6 +80,7 @@ class VantageAgent:
         self.optimizer       = PortfolioOptimizer()
         self.regime          = RegimeDetector()
         self.edge_filter     = EdgeFilter()
+        self.perf_tracker    = PerformanceTracker(self.db)
         self._open_positions: list[dict] = []
         self._account_metrics: dict = {}
 
@@ -198,6 +200,8 @@ class VantageAgent:
                     return await self._tool_institutional_research(**inputs)
                 case "get_portfolio_analysis":
                     return await self._tool_portfolio_analysis(**inputs)
+                case "get_performance_stats":
+                    return await self._tool_performance_stats(**inputs)
                 case "calculate_position_size":
                     return self._tool_calculate_position_size(**inputs)
                 case "get_execution_quality":
@@ -484,6 +488,9 @@ class VantageAgent:
                 + (f"Size: {result.recommended_size:.0%}, RR: {result.recommended_rr}:1" if result.passes else "")
             ),
         }
+
+    async def _tool_performance_stats(self, lookback_days: int = 30) -> dict:
+        return await self.perf_tracker.get_stats(lookback_days=lookback_days)
 
     def _tool_calculate_position_size(
         self,

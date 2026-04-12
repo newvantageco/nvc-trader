@@ -336,56 +336,21 @@ async def get_sentiment(instrument: str):
 # ─── Analytics ────────────────────────────────────────────────────────────────
 
 @app.get("/analytics")
-async def get_analytics():
-    """Aggregated performance metrics from the trades table."""
-    trades = await db.select("trades")
-    closed = [t for t in trades if t.get("status") == "closed"]
+async def get_analytics(days: int = 30):
+    """Full performance analytics from PerformanceTracker (real P&L, Kelly, Sharpe)."""
+    from core.analysis.performance_tracker import PerformanceTracker
+    tracker = PerformanceTracker(db)
+    stats   = await tracker.get_stats(lookback_days=days)
+    # Also include total signal count for dashboard
+    signals = await db.select("signals", limit=1000)
+    stats["total_signals"] = len(signals)
+    return stats
 
-    if not closed:
-        return {
-            "total_trades": 0, "winning_trades": 0, "losing_trades": 0,
-            "win_rate": 0.0, "total_pnl": 0.0, "avg_win": 0.0,
-            "avg_loss": 0.0, "profit_factor": 0.0, "sharpe_ratio": 0.0,
-            "max_drawdown_pct": 0.0, "total_signals": len(await db.select("signals")),
-            "by_instrument": {},
-        }
 
-    winners = [t for t in closed if (t.get("pnl") or 0) > 0]
-    losers  = [t for t in closed if (t.get("pnl") or 0) <= 0]
-    gross_p = sum(t.get("pnl", 0) for t in winners)
-    gross_l = abs(sum(t.get("pnl", 0) for t in losers))
-
-    by_instrument: dict = {}
-    for t in closed:
-        sym = t.get("instrument", "")
-        if sym not in by_instrument:
-            by_instrument[sym] = {"trades": 0, "pnl": 0.0, "wins": 0}
-        by_instrument[sym]["trades"] += 1
-        by_instrument[sym]["pnl"]    += t.get("pnl", 0)
-        if (t.get("pnl") or 0) > 0:
-            by_instrument[sym]["wins"] += 1
-
-    by_instrument_out = {
-        k: {"trades": v["trades"], "pnl": round(v["pnl"], 2),
-            "win_rate": v["wins"] / v["trades"] if v["trades"] else 0}
-        for k, v in by_instrument.items()
-    }
-
-    signals = await db.select("signals")
-    return {
-        "total_trades":    len(closed),
-        "winning_trades":  len(winners),
-        "losing_trades":   len(losers),
-        "win_rate":        len(winners) / len(closed) if closed else 0,
-        "total_pnl":       round(sum(t.get("pnl", 0) for t in closed), 2),
-        "avg_win":         round(gross_p / len(winners), 2) if winners else 0,
-        "avg_loss":        round(gross_l / len(losers), 2) if losers else 0,
-        "profit_factor":   round(gross_p / gross_l, 3) if gross_l else 9.99,
-        "sharpe_ratio":    0.0,
-        "max_drawdown_pct": 0.0,
-        "total_signals":   len(signals),
-        "by_instrument":   by_instrument_out,
-    }
+@app.get("/performance")
+async def get_performance(days: int = 30):
+    """Alias for /analytics — returns trade performance stats."""
+    return await get_analytics(days=days)
 
 
 @app.get("/portfolio")

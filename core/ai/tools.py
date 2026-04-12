@@ -394,6 +394,30 @@ TRADING_TOOLS: list[dict[str, Any]] = [
     },
 
     {
+        "name": "get_performance_stats",
+        "description": (
+            "Get real trading performance statistics from closed trades. "
+            "Returns: win_rate, avg_win_usd, avg_loss_usd, profit_factor, expectancy_per_trade, "
+            "max_consecutive_losses, Sharpe ratio, Kelly fraction, recommended_risk_pct, "
+            "best/worst instrument, daily P&L series, and a plain-English assessment. "
+            "Call this at the start of each cycle to calibrate position sizing. "
+            "Use recommended_risk_pct instead of a fixed 1% when sufficient trade history exists (≥20 trades). "
+            "If profit_factor < 1.0 or max_consecutive_losses ≥ 5, reduce position sizes immediately."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "lookback_days": {
+                    "type": "integer",
+                    "description": "Days of history to analyse. Default 30.",
+                    "default": 30,
+                },
+            },
+            "required": [],
+        },
+    },
+
+    {
         "name": "calculate_position_size",
         "description": (
             "Calculate the correct lot size using the Van Tharp fixed-fractional method "
