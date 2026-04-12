@@ -439,9 +439,15 @@ class VantageAgent:
     ) -> dict:
         if ohlcv is None:
             try:
-                price_data = await self.ta_engine.get_price_data(instrument, "H1")
-                ohlcv = price_data.get("candles", [])
-            except Exception:
+                # Need full OHLCV dataset (200+ candles) for ADX + autocorr.
+                # _get_ohlcv is internal but returning the full DataFrame via
+                # the TA engine's analyse call is the right approach.
+                # We fetch H4 data — enough history, not too slow.
+                import pandas as pd
+                df = await self.ta_engine._get_ohlcv(instrument, "H4")
+                ohlcv = df.to_dict("records") if isinstance(df, pd.DataFrame) else []
+            except Exception as exc:
+                logger.debug(f"[REGIME] OHLCV fetch failed for {instrument}: {exc}")
                 ohlcv = []
         return await self.regime.detect(instrument, ohlcv)
 
@@ -501,6 +507,18 @@ class VantageAgent:
         regime:          str = "RANGING",
         factors_aligned: int = 3,
     ) -> dict:
+        # Always apply circuit breaker multiplier — agent cannot override this
+        circuit_mult = self.circuit_breaker.size_multiplier()
+
+        if circuit_mult == 0.0:
+            return {
+                "lot_size": 0.0,
+                "risk_usd": 0.0,
+                "risk_pct": 0.0,
+                "circuit_mult": 0.0,
+                "instruction": "BLOCKED by circuit breaker — daily or weekly drawdown limit hit. No new trades.",
+            }
+
         result = self.position_sizer.calculate_lot(
             instrument=instrument,
             entry_price=entry_price,
@@ -508,11 +526,14 @@ class VantageAgent:
             account_equity=account_equity,
             regime=regime,
             factors_aligned=factors_aligned,
+            circuit_mult=circuit_mult,
         )
+
+        cb_note = f" [WEEKLY LIMIT: sizes halved]" if circuit_mult < 1.0 else ""
         result["instruction"] = (
-            f"Use lot_size={result['lot_size']} in execute_trade. "
+            f"Use lot_size={result['lot_size']} in execute_trade.{cb_note} "
             f"Risk: ${result['risk_usd']:.2f} ({result['risk_pct']:.2f}% of equity). "
-            f"Regime mult: {result['regime_mult']}× | Conviction mult: {result['conviction_mult']}×"
+            f"Regime={result['regime_mult']}× | Conviction={result['conviction_mult']}× | Circuit={circuit_mult}×"
         )
         return result
 

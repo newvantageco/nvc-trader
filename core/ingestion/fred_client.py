@@ -72,7 +72,7 @@ class FREDClient:
         }
         """
         if not self.api_key:
-            return self._estimated_environment()
+            return await self._estimated_environment()
 
         # Fetch key series concurrently
         import asyncio
@@ -185,18 +185,84 @@ class FREDClient:
             logger.debug(f"[FRED] {series_id}: {e}")
             return None
 
-    @staticmethod
-    def _estimated_environment() -> dict:
-        """Return estimated macro context when FRED key not available."""
+    async def _estimated_environment(self) -> dict:
+        """
+        Best-effort macro context when FRED key not available.
+        Tries US Treasury yield curve API (free, no key needed) for real data.
+        Falls back to 2026 consensus estimates if that also fails.
+        """
+        yc_spread = await self._fetch_treasury_yield_spread()
+
+        # April 2026 consensus estimates (updated from stale 2024 values)
+        # Fed has cut from 5.25% to ~3.75-4.00% through 2025-2026
+        # ECB cut to ~2.50%, BoJ raised to ~0.75-1.00%
+        fed_rate    = 3.75
+        inflation   = 2.6
+        real_rate   = fed_rate - inflation
+
+        if yc_spread is None:
+            yc_spread     = 0.15   # 2026 estimate: curve normalising after inversion
+        yc_signal     = "NORMAL" if yc_spread > 0 else ("FLAT" if yc_spread > -0.3 else "INVERTED")
+        recession_risk = "LOW" if yc_spread > 0.2 else ("MEDIUM" if yc_spread > -0.2 else "HIGH")
+
+        usd_bias = "NEUTRAL"
+        if real_rate > 0.5:
+            usd_bias = "HAWKISH"
+        elif real_rate < -0.5:
+            usd_bias = "DOVISH"
+
         return {
-            "fed_funds_rate":         5.25,
-            "yield_curve_spread":     -0.3,
-            "inflation_expectations": 2.4,
-            "unemployment_rate":      3.9,
-            "yield_curve_signal":     "FLAT",
-            "usd_bias":               "HAWKISH",
-            "recession_risk":         "MEDIUM",
-            "rate_differentials":     {},
-            "data_source":            "estimated (no FRED_API_KEY set)",
-            "fetched_at":             datetime.now(timezone.utc).isoformat(),
+            "fed_funds_rate":           fed_rate,
+            "yield_curve_spread":       round(yc_spread, 3),
+            "inflation_expectations":   inflation,
+            "unemployment_rate":        4.1,
+            "yield_curve_signal":       yc_signal,
+            "usd_bias":                 usd_bias,
+            "recession_risk":           recession_risk,
+            "rate_differentials":       {
+                "EURUSD": round(2.50 - fed_rate, 2),   # ECB ~2.50% minus Fed
+                "GBPUSD": round(4.25 - fed_rate, 2),   # BoE ~4.25% minus Fed
+                "USDJPY": round(fed_rate - 0.75, 2),   # Fed minus BoJ ~0.75%
+            },
+            "data_source":              "estimated_2026 (set FRED_API_KEY for live data)",
+            "fetched_at":               datetime.now(timezone.utc).isoformat(),
         }
+
+    async def _fetch_treasury_yield_spread(self) -> float | None:
+        """
+        Fetch real 10Y-2Y spread from US Treasury XML feed (free, no key).
+        Returns None if unavailable.
+        """
+        try:
+            url = "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml?data=daily_treasury_yield_curve&field_tl_date_value_month={}".format(
+                datetime.now(timezone.utc).strftime("%Y%m")
+            )
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=8),
+                headers={"User-Agent": "NVC-Trader/1.0"}
+            ) as session:
+                async with session.get(url) as resp:
+                    if resp.status != 200:
+                        return None
+                    text = await resp.text()
+
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(text)
+            ns = {"d": "http://schemas.microsoft.com/ado/2007/08/dataservices"}
+
+            # Get the most recent entry's BC_10YEAR and BC_2YEAR
+            entries = root.findall(".//{http://www.w3.org/2005/Atom}entry")
+            if not entries:
+                return None
+
+            latest = entries[-1]
+            y10 = latest.find(".//d:BC_10YEAR", ns)
+            y2  = latest.find(".//d:BC_2YEAR",  ns)
+
+            if y10 is not None and y2 is not None and y10.text and y2.text:
+                spread = float(y10.text) - float(y2.text)
+                logger.debug(f"[FRED] Treasury spread (live): {spread:.3f}%")
+                return round(spread, 3)
+        except Exception as e:
+            logger.debug(f"[FRED] Treasury yield fetch failed: {e}")
+        return None

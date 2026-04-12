@@ -71,12 +71,13 @@ class PositionSizer:
 
     def calculate_lot(
         self,
-        instrument:    str,
-        entry_price:   float,
-        stop_loss:     float,
-        account_equity: float,
-        regime:        str  = "RANGING",
+        instrument:      str,
+        entry_price:     float,
+        stop_loss:       float,
+        account_equity:  float,
+        regime:          str = "RANGING",
         factors_aligned: int = 3,
+        circuit_mult:    float = 1.0,   # from CircuitBreaker.size_multiplier()
     ) -> dict:
         """
         Calculate the correct lot size using Van Tharp formula + multipliers.
@@ -89,11 +90,12 @@ class PositionSizer:
         if sl_pips <= 0:
             return {"lot_size": 0.0, "error": "Stop loss distance is zero", "risk_usd": 0}
 
-        regime_mult    = REGIME_MULTIPLIERS.get(regime, 0.7)
+        regime_mult     = REGIME_MULTIPLIERS.get(regime, 0.7)
         conviction_mult = CONVICTION_MULTIPLIERS.get(min(factors_aligned, 5), 0.6)
 
-        # Effective risk % after multipliers
-        effective_risk_pct = self.base_risk_pct * regime_mult * conviction_mult
+        # Effective risk % after all multipliers
+        # circuit_mult: 0.0 = no trade, 0.5 = R5 weekly limit, 1.0 = normal
+        effective_risk_pct = self.base_risk_pct * regime_mult * conviction_mult * circuit_mult
         # Hard cap at 2%
         effective_risk_pct = min(effective_risk_pct, self.hard_max_risk_pct)
 
@@ -107,17 +109,19 @@ class PositionSizer:
         logger.info(
             f"[SIZER] {instrument}: regime={regime}({regime_mult}×) "
             f"conviction={factors_aligned}/5({conviction_mult}×) "
+            f"circuit={circuit_mult}× → "
             f"risk={effective_risk_pct:.2f}% → {lots} lots "
             f"(${actual_risk_usd:.2f} at risk)"
         )
 
         return {
-            "lot_size":         lots,
-            "sl_pips":          round(sl_pips, 1),
-            "risk_usd":         round(actual_risk_usd, 2),
-            "risk_pct":         round(actual_risk_pct, 3),
-            "regime_mult":      regime_mult,
-            "conviction_mult":  conviction_mult,
+            "lot_size":           lots,
+            "sl_pips":            round(sl_pips, 1),
+            "risk_usd":           round(actual_risk_usd, 2),
+            "risk_pct":           round(actual_risk_pct, 3),
+            "regime_mult":        regime_mult,
+            "conviction_mult":    conviction_mult,
+            "circuit_mult":       circuit_mult,
             "effective_risk_pct": round(effective_risk_pct, 2),
         }
 

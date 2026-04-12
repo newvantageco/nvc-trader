@@ -421,13 +421,15 @@ TRADING_TOOLS: list[dict[str, Any]] = [
         "name": "calculate_position_size",
         "description": (
             "Calculate the correct lot size using the Van Tharp fixed-fractional method "
-            "with regime and conviction multipliers. "
-            "ALWAYS call this before execute_trade to get the correct lot_size. "
+            "with regime, conviction, AND circuit breaker multipliers. "
+            "ALWAYS call this before execute_trade — it enforces all risk rules automatically. "
             "Base risk: 1% of equity. "
             "Regime multipliers: TRENDING=1.0×, RANGING=0.7×, CRISIS/VOLATILE=0.3×. "
             "Conviction multipliers: 4-5 factors aligned=1.3×, 3 factors=1.0×, 2 factors=0.6×. "
+            "Circuit breaker (automatic): daily DD>=2% returns lot_size=0 (BLOCKED). "
+            "Weekly DD>=5% (Rule R5) halves all sizes automatically. "
             "Hard ceiling: never exceeds 2% risk regardless of multipliers. "
-            "Returns: lot_size, risk_usd, risk_pct, sl_pips, and all multipliers applied."
+            "Returns: lot_size (use this directly), risk_usd, risk_pct, instruction."
         ),
         "input_schema": {
             "type": "object",

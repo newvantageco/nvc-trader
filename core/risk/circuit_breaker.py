@@ -111,14 +111,35 @@ class CircuitBreaker:
         reported = self._metrics.get("daily_drawdown_pct", 0.0)
         return max(computed, reported) >= self.max_daily_dd
 
+    def is_weekly_limit_hit(self) -> bool:
+        """R5: weekly loss >= 5% → halve all position sizes."""
+        return self._computed_dd.get("weekly", 0.0) >= self.max_weekly_dd
+
+    def size_multiplier(self) -> float:
+        """
+        Returns a multiplier (0.0–1.0) to apply on top of Van Tharp sizing.
+        R1: daily >= 2%  → 0.0 (no new trades)
+        R5: weekly >= 5% → 0.5 (half size)
+        R6: computed by agent from consecutive losses (not tracked here)
+        """
+        if self.is_daily_limit_hit() or self._hard_stop:
+            return 0.0
+        if self.is_weekly_limit_hit():
+            return 0.5
+        return 1.0
+
     def status(self) -> dict:
+        mult = self.size_multiplier()
         return {
-            "hard_stop":         self._hard_stop,
-            "daily_limit_hit":   self.is_daily_limit_hit(),
-            "daily_drawdown_pct":  self._computed_dd.get("daily", 0.0),
-            "weekly_drawdown_pct": self._computed_dd.get("weekly", 0.0),
-            "monthly_drawdown_pct":self._computed_dd.get("monthly", 0.0),
-            "max_daily_dd":      self.max_daily_dd,
-            "max_weekly_dd":     self.max_weekly_dd,
-            "max_monthly_dd":    self.max_monthly_dd,
+            "hard_stop":            self._hard_stop,
+            "daily_limit_hit":      self.is_daily_limit_hit(),
+            "weekly_limit_hit":     self.is_weekly_limit_hit(),
+            "size_multiplier":      mult,
+            "daily_drawdown_pct":   self._computed_dd.get("daily",   0.0),
+            "weekly_drawdown_pct":  self._computed_dd.get("weekly",  0.0),
+            "monthly_drawdown_pct": self._computed_dd.get("monthly", 0.0),
+            "max_daily_dd":         self.max_daily_dd,
+            "max_weekly_dd":        self.max_weekly_dd,
+            "max_monthly_dd":       self.max_monthly_dd,
+            "trading_allowed":      mult > 0.0,
         }
