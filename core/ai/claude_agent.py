@@ -8,8 +8,22 @@ and can also be triggered by high-impact news events.
 
 import json
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, date, timezone
+from decimal import Decimal
 from typing import Any
+
+
+class _SafeEncoder(json.JSONEncoder):
+    """Handles datetime, date, Decimal and other non-serialisable types."""
+    def default(self, obj: Any) -> Any:
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        if isinstance(obj, Decimal):
+            return float(obj)
+        try:
+            return super().default(obj)
+        except TypeError:
+            return str(obj)
 
 import anthropic
 from loguru import logger
@@ -98,7 +112,8 @@ class VantageAgent:
             iterations += 1
             logger.debug(f"[VANTAGE] Agent iteration {iterations}")
 
-            response = self.client.messages.create(
+            response = await asyncio.to_thread(
+                self.client.messages.create,
                 model="claude-opus-4-6",
                 max_tokens=8096,
                 system=TRADING_AGENT_SYSTEM_PROMPT,
@@ -136,7 +151,7 @@ class VantageAgent:
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,
-                    "content": json.dumps(result),
+                    "content": json.dumps(result, cls=_SafeEncoder),
                 })
 
             messages.append({"role": "user", "content": tool_results})
@@ -316,7 +331,12 @@ class VantageAgent:
 
     async def _tool_close_position(self, ticket: int, reason: str) -> dict:
         result = await self.zmq.close_position(ticket, reason)
-        await self.db.insert("position_closes", {"ticket": ticket, "reason": reason, "result": result})
+        # Log close event into trades table as a status update
+        await self.db.insert("trades", {
+            "ticket": ticket, "status": "closed", "close_reason": reason,
+            "close_result": json.dumps(result, cls=_SafeEncoder),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
         return result
 
     async def _tool_modify_position(
@@ -327,9 +347,12 @@ class VantageAgent:
         new_take_profit: float | None = None,
     ) -> dict:
         result = await self.zmq.modify_position(ticket, new_stop_loss, new_take_profit)
-        await self.db.insert("position_modifications", {
-            "ticket": ticket, "reason": reason,
-            "new_sl": new_stop_loss, "new_tp": new_take_profit, "result": result,
+        # Log to trades table — no separate modifications table
+        await self.db.insert("trades", {
+            "ticket": ticket, "status": "modified",
+            "stop_loss": new_stop_loss, "take_profit": new_take_profit,
+            "modify_reason": reason,
+            "created_at": datetime.now(timezone.utc).isoformat(),
         })
         return result
 
@@ -547,11 +570,11 @@ class VantageAgent:
                 "cycle_id":        cycle_id,
                 "trigger":         trigger,
                 "trades_executed": len(trades),
-                "trades":          json.dumps(trades, default=str),
+                "trades":          json.dumps(trades,                    cls=_SafeEncoder),
                 "message_count":   len(messages),
-                "tool_calls":      json.dumps(tool_calls),
+                "tool_calls":      json.dumps(tool_calls,                cls=_SafeEncoder),
                 "summary":         summary,
-                "circuit_breaker": json.dumps(self.circuit_breaker.status()),
+                "circuit_breaker": json.dumps(self.circuit_breaker.status(), cls=_SafeEncoder),
                 "timestamp":       datetime.now(timezone.utc).isoformat(),
             })
         except Exception as exc:

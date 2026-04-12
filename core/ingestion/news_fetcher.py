@@ -31,29 +31,34 @@ INSTRUMENT_KEYWORDS: dict[str, list[str]] = {
 }
 
 RSS_FEEDS = [
-    # Tier 1 — high trust
-    ("reuters", "https://feeds.reuters.com/reuters/businessNews"),
-    ("reuters_fx", "https://feeds.reuters.com/reuters/MostRead"),
-    ("ft", "https://www.ft.com/?format=rss"),
-    ("cnbc", "https://www.cnbc.com/id/100003114/device/rss/rss.html"),
-    ("bbc", "http://feeds.bbci.co.uk/news/business/rss.xml"),
-    ("ap", "https://feeds.apnews.com/apnews/business"),
+    # Tier 1 — verified reachable from cloud (Reuters/AP block Fly.io IPs)
+    ("bbc",          "https://feeds.bbci.co.uk/news/business/rss.xml"),
+    ("cnbc",         "https://www.cnbc.com/id/100003114/device/rss/rss.html"),
+    ("cnbc_fx",      "https://www.cnbc.com/id/20910258/device/rss/rss.html"),
+    ("marketwatch",  "https://feeds.marketwatch.com/marketwatch/realtimeheadlines/"),
+    ("forexlive",    "https://www.forexlive.com/feed/news"),
+    ("guardian",     "https://www.theguardian.com/business/rss"),
+    ("ft",           "https://www.ft.com/?format=rss"),
     # Tier 2 — medium trust
-    ("guardian", "https://www.theguardian.com/business/rss"),
-    ("aljazeera", "https://www.aljazeera.com/xml/rss/all.xml"),
-    ("seeking_alpha", "https://seekingalpha.com/feed.xml"),
+    ("aljazeera",    "https://www.aljazeera.com/xml/rss/all.xml"),
+    ("investing",    "https://www.investing.com/rss/news.rss"),
+    ("yahoo_fin",    "https://finance.yahoo.com/news/rssindex"),
+    ("seeking_alpha","https://seekingalpha.com/feed.xml"),
 ]
 
 SOURCE_WEIGHTS = {
-    "reuters": 1.0,
-    "ap": 1.0,
-    "ft": 0.95,
-    "cnbc": 0.85,
-    "bbc": 0.80,
-    "guardian": 0.75,
-    "aljazeera": 0.70,
+    "bbc":           0.90,
+    "cnbc":          0.85,
+    "cnbc_fx":       0.85,
+    "marketwatch":   0.85,
+    "forexlive":     0.90,
+    "guardian":      0.75,
+    "ft":            0.95,
+    "aljazeera":     0.70,
+    "investing":     0.75,
+    "yahoo_fin":     0.70,
     "seeking_alpha": 0.65,
-    "newsapi": 0.75,
+    "newsapi":       0.75,
 }
 
 
