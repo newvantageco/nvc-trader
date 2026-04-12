@@ -24,7 +24,7 @@ httpx==0.27.0
 
 # ─── Technical Analysis ───────────────────────────────────────────────────────
 pandas>=2.2.0,<3.0.0           # pandas-ta not tested on pandas 3.x
-numpy>=1.26.0,<2.0.0
+numpy>=2.2.6                   # pandas-ta 0.4.71b0 requires >=2.2.6 (via numba)
 pandas-ta==0.4.71b0
 # TA-Lib — v0.6+ ships self-contained manylinux wheel, no C build needed
 TA-Lib>=0.4.28
