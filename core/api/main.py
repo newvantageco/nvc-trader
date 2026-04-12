@@ -542,6 +542,96 @@ async def save_settings(settings: dict):
     return {"status": "saved"}
 
 
+@app.get("/research/feed")
+async def get_research_feed(category: str = "all"):
+    """
+    Aggregate recent videos from curated financial YouTube channels via public RSS.
+    No API key required — YouTube exposes channel feeds at:
+    https://www.youtube.com/feeds/videos.xml?channel_id=CHANNEL_ID
+    """
+    import asyncio
+    import xml.etree.ElementTree as ET
+    from datetime import datetime, timezone
+
+    CHANNELS = [
+        # ── Macro / Economics ──────────────────────────────────────────────
+        {"id": "UCVSjbClvXbwbIOC7q3mbG7w", "name": "Economics Explained",   "category": "macro"},
+        {"id": "UCASM3bXaJaRpRILvBmPWlGQ", "name": "Patrick Boyle",          "category": "macro"},
+        {"id": "UCXmhU5mYwPfAdJMEMRE4JMA", "name": "Real Vision Finance",    "category": "macro"},
+        {"id": "UCbmNph6atAoGfqLoCL_duAg", "name": "Ticker Symbol: YOU",     "category": "macro"},
+        # ── Financial News ─────────────────────────────────────────────────
+        {"id": "UCIALMKvObZNtJ6AmdCLP7Lg", "name": "Bloomberg Markets",      "category": "news"},
+        {"id": "UCrp_UI8XtuYfpiqluWLD7Lw", "name": "CNBC Television",        "category": "news"},
+        {"id": "UCHv-vDRWQn0Sn2lR-TGp8og", "name": "Financial Times",        "category": "news"},
+        # ── Forex ──────────────────────────────────────────────────────────
+        {"id": "UCt2QkDRE5f9vCh_S4iH3fGA", "name": "ForexSignals TV",        "category": "forex"},
+        {"id": "UCkyLJh7gIbTe9OXn0c6ZBQQ", "name": "Rayner Teo",             "category": "forex"},
+        {"id": "UCMjlDOf0UO9wSX41AkJ_keg", "name": "No Nonsense Forex",      "category": "forex"},
+        # ── Gold / Commodities ─────────────────────────────────────────────
+        {"id": "UCJ5YzMpKKmOiAEJcvYAaeMQ", "name": "Kitco News",             "category": "gold"},
+        {"id": "UCnExV-tTiKbFBEiTJGUkWNA", "name": "Gold Silver Pros",       "category": "gold"},
+    ]
+
+    ns = {
+        "atom":   "http://www.w3.org/2005/Atom",
+        "yt":     "http://www.youtube.com/xml/schemas/2015",
+        "media":  "http://search.yahoo.com/mrss/",
+    }
+
+    async def fetch_channel(ch: dict) -> list[dict]:
+        url = f"https://www.youtube.com/feeds/videos.xml?channel_id={ch['id']}"
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                r = await client.get(url)
+                if not r.ok:
+                    return []
+            root = ET.fromstring(r.text)
+            videos = []
+            for entry in root.findall("atom:entry", ns)[:5]:
+                vid_id = entry.findtext("yt:videoId", namespaces=ns) or ""
+                title  = entry.findtext("atom:title", namespaces=ns) or ""
+                pub    = entry.findtext("atom:published", namespaces=ns) or ""
+                thumb  = f"https://img.youtube.com/vi/{vid_id}/mqdefault.jpg" if vid_id else ""
+                views_el = entry.find("media:group/media:community/media:statistics", ns)
+                views = int(views_el.get("views", 0)) if views_el is not None else 0
+                videos.append({
+                    "video_id":    vid_id,
+                    "title":       title,
+                    "channel":     ch["name"],
+                    "category":    ch["category"],
+                    "published":   pub,
+                    "thumbnail":   thumb,
+                    "url":         f"https://www.youtube.com/watch?v={vid_id}",
+                    "views":       views,
+                })
+            return videos
+        except Exception:
+            return []
+
+    tasks = [fetch_channel(ch) for ch in CHANNELS]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    all_videos: list[dict] = []
+    for r in results:
+        if isinstance(r, list):
+            all_videos.extend(r)
+
+    # Filter by category
+    if category != "all":
+        all_videos = [v for v in all_videos if v["category"] == category]
+
+    # Sort by published date descending
+    def parse_dt(v: dict) -> datetime:
+        try:
+            return datetime.fromisoformat(v["published"].replace("Z", "+00:00"))
+        except Exception:
+            return datetime.min.replace(tzinfo=timezone.utc)
+
+    all_videos.sort(key=parse_dt, reverse=True)
+
+    return {"videos": all_videos[:40], "total": len(all_videos)}
+
+
 @app.get("/settings")
 async def get_settings():
     rows = await db.select("settings", {"key": "risk_params"})

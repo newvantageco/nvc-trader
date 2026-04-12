@@ -2,13 +2,14 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, TrendingUp, BarChart3, Settings, Activity, Brain, ShieldCheck } from 'lucide-react'
+import { LayoutDashboard, TrendingUp, BarChart3, Settings, Activity, Brain, ShieldCheck, Youtube } from 'lucide-react'
 
 const NAV = [
   { href: '/',           label: 'Terminal',  icon: LayoutDashboard },
   { href: '/signals',    label: 'Signals',   icon: Activity },
   { href: '/markets',    label: 'Markets',   icon: TrendingUp },
   { href: '/analytics',  label: 'Analytics', icon: BarChart3 },
+  { href: '/research',   label: 'Research',  icon: Youtube },
   { href: '/brain',      label: 'Brain',     icon: Brain },
   { href: '/admin',      label: 'Admin',     icon: ShieldCheck },
   { href: '/settings',   label: 'Settings',  icon: Settings },
@@ -59,7 +60,7 @@ export function DesktopSidebar() {
 export function MobileNav() {
   const pathname = usePathname()
   // Only show the 5 most important nav items on mobile to avoid crowding
-  const mobileNav = NAV.filter(n => ['/', '/signals', '/markets', '/analytics', '/settings'].includes(n.href))
+  const mobileNav = NAV.filter(n => ['/', '/signals', '/markets', '/research', '/settings'].includes(n.href))
   return (
     <nav
       className="sm:hidden fixed bottom-0 inset-x-0 flex items-center justify-around border-t z-50"
