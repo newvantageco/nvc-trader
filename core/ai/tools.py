@@ -334,12 +334,15 @@ TRADING_TOOLS: list[dict[str, Any]] = [
     {
         "name": "get_market_regime",
         "description": (
-            "Classify the current market regime for an instrument using ADX, EMA alignment, and ATR. "
-            "Returns: TRENDING_BULLISH, TRENDING_BEARISH, RANGING, VOLATILE, EXHAUSTED, or BREAKOUT. "
-            "CRITICAL: check regime before every trade. "
-            "Do NOT use trend-following entries in RANGING markets. "
-            "Do NOT trade VOLATILE or EXHAUSTED regimes — wait for structure. "
-            "BREAKOUT regime = enter immediately with momentum and tight initial stop."
+            "Classify the current market regime for an instrument. "
+            "Returns: TRENDING_BULLISH, TRENDING_BEARISH, RANGING, CRISIS, EXHAUSTED, or BREAKOUT. "
+            "Also returns ATR ratio (10d/30d), autocorrelation (>+0.2=trending, ~0=ranging), "
+            "ADX, and EMA alignment. "
+            "MANDATORY: call this first for every instrument before analysis. "
+            "CRISIS regime (ATR ratio > 1.8): reduce all sizes to 0.3×, manage existing only. "
+            "EXHAUSTED: trend ending — close trend trades, do not add. "
+            "RANGING: use mean reversion entries, NOT momentum breakouts. "
+            "TRENDING: use momentum entries, trail stops aggressively."
         ),
         "input_schema": {
             "type": "object",
@@ -387,6 +390,41 @@ TRADING_TOOLS: list[dict[str, Any]] = [
                 },
             },
             "required": ["instrument", "direction", "ta_score", "sentiment", "order_flow", "macro", "regime"],
+        },
+    },
+
+    {
+        "name": "calculate_position_size",
+        "description": (
+            "Calculate the correct lot size using the Van Tharp fixed-fractional method "
+            "with regime and conviction multipliers. "
+            "ALWAYS call this before execute_trade to get the correct lot_size. "
+            "Base risk: 1% of equity. "
+            "Regime multipliers: TRENDING=1.0×, RANGING=0.7×, CRISIS/VOLATILE=0.3×. "
+            "Conviction multipliers: 4-5 factors aligned=1.3×, 3 factors=1.0×, 2 factors=0.6×. "
+            "Hard ceiling: never exceeds 2% risk regardless of multipliers. "
+            "Returns: lot_size, risk_usd, risk_pct, sl_pips, and all multipliers applied."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "instrument":      {"type": "string", "description": "Instrument symbol (e.g. EURUSD)"},
+                "entry_price":     {"type": "number", "description": "Proposed entry price"},
+                "stop_loss":       {"type": "number", "description": "Stop loss price"},
+                "account_equity":  {"type": "number", "description": "Current account equity in USD"},
+                "regime": {
+                    "type": "string",
+                    "description": "Current regime from get_market_regime",
+                    "enum": ["TRENDING_BULLISH", "TRENDING_BEARISH", "BREAKOUT", "RANGING", "EXHAUSTED", "VOLATILE", "CRISIS"],
+                    "default": "RANGING",
+                },
+                "factors_aligned": {
+                    "type": "integer",
+                    "description": "Number of the 5 signal factors that align with this trade (0–5)",
+                    "default": 3,
+                },
+            },
+            "required": ["instrument", "entry_price", "stop_loss", "account_equity"],
         },
     },
 

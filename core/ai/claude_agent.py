@@ -198,6 +198,8 @@ class VantageAgent:
                     return await self._tool_institutional_research(**inputs)
                 case "get_portfolio_analysis":
                     return await self._tool_portfolio_analysis(**inputs)
+                case "calculate_position_size":
+                    return self._tool_calculate_position_size(**inputs)
                 case "get_execution_quality":
                     return await self._tool_execution_quality(**inputs)
                 case "get_market_regime":
@@ -482,6 +484,30 @@ class VantageAgent:
                 + (f"Size: {result.recommended_size:.0%}, RR: {result.recommended_rr}:1" if result.passes else "")
             ),
         }
+
+    def _tool_calculate_position_size(
+        self,
+        instrument:      str,
+        entry_price:     float,
+        stop_loss:       float,
+        account_equity:  float,
+        regime:          str = "RANGING",
+        factors_aligned: int = 3,
+    ) -> dict:
+        result = self.position_sizer.calculate_lot(
+            instrument=instrument,
+            entry_price=entry_price,
+            stop_loss=stop_loss,
+            account_equity=account_equity,
+            regime=regime,
+            factors_aligned=factors_aligned,
+        )
+        result["instruction"] = (
+            f"Use lot_size={result['lot_size']} in execute_trade. "
+            f"Risk: ${result['risk_usd']:.2f} ({result['risk_pct']:.2f}% of equity). "
+            f"Regime mult: {result['regime_mult']}× | Conviction mult: {result['conviction_mult']}×"
+        )
+        return result
 
     async def _tool_execution_quality(
         self, instrument: str | None = None

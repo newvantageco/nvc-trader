@@ -24,10 +24,30 @@ from typing import Optional
 import aiohttp
 from loguru import logger
 
-# CFTC disaggregated futures-only report (includes Forex + Commodities)
-CFTC_CSV_URL = "https://www.cftc.gov/dea/newcot/f_disagg.txt"
+# Legacy COT — Futures Only, current year.
+# This is the ONLY single file that covers BOTH FX currencies AND commodities.
+# f_disagg.txt (what was here before) only covers physical commodities — no FX.
+CFTC_CSV_URL = "https://www.cftc.gov/dea/newcot/f_year.txt"
 
-# Map our symbols to CFTC market names in the report
+# Legacy COT column layout (0-indexed after CSV split):
+#  [0]  Market name + exchange
+#  [1]  As_of_Date YYMMDD
+#  [2]  Report_Date MM/DD/YYYY
+#  [3]  Contract code
+#  [4]  Market code
+#  [5]  Open_Interest_All
+#  [6]  NonComm_Positions_Long_All    ← hedge fund LONG
+#  [7]  NonComm_Positions_Short_All   ← hedge fund SHORT
+#  [8]  NonComm_Positions_Spreading
+#  [9]  Comm_Positions_Long_All       ← commercial LONG
+#  [10] Comm_Positions_Short_All      ← commercial SHORT
+#  [11] Tot_Rept_Positions_Long_All
+#  [12] Tot_Rept_Positions_Short_All
+#  [13] NonRept_Positions_Long_All    ← retail LONG
+#  [14] NonRept_Positions_Short_All   ← retail SHORT
+
+# Map our symbols to search strings in the CFTC market name field.
+# Partial match: "EURO FX" matches "EURO FX - CHICAGO MERCANTILE EXCHANGE"
 SYMBOL_TO_CFTC: dict[str, str] = {
     "EURUSD":  "EURO FX",
     "GBPUSD":  "BRITISH POUND STERLING",
@@ -36,11 +56,11 @@ SYMBOL_TO_CFTC: dict[str, str] = {
     "USDCAD":  "CANADIAN DOLLAR",
     "NZDUSD":  "NEW ZEALAND DOLLAR",
     "USDCHF":  "SWISS FRANC",
-    "XAUUSD":  "GOLD",
-    "XAGUSD":  "SILVER",
+    "XAUUSD":  "GOLD - COMMODITY EXCHANGE",   # avoid matching GOLD (MINI)
+    "XAGUSD":  "SILVER - COMMODITY EXCHANGE",
     "USOIL":   "CRUDE OIL, LIGHT SWEET",
     "UKOIL":   "BRENT CRUDE OIL",
-    "NATGAS":  "NATURAL GAS",
+    "NATGAS":  "NATURAL GAS (NYMEX)",
 }
 
 # Cache: symbol → (timestamp, result)
@@ -106,102 +126,134 @@ class COTFetcher:
         rows: list[list[str]] = []
         for line in csv_text.splitlines():
             if cftc_name in line.upper():
-                rows.append(line.split(","))
+                parts = line.split(",")
+                if len(parts) >= 11:   # need at least up to column [10]
+                    rows.append(parts)
 
         if not rows:
+            logger.debug(f"[COT] No rows matched for {instrument} (search: '{cftc_name}')")
             return self._empty(instrument)
 
-        # Most recent row first (file is usually newest-last, so take last)
-        row = rows[-1]
+        # File is oldest-first; take last row = most recent
+        row  = rows[-1]
         prev = rows[-2] if len(rows) >= 2 else None
 
         try:
             report_date = row[2].strip()
 
-            # Columns vary by report but standard disaggregated layout:
-            # [12] = Prod/Merch Long  [13] = Prod/Merch Short
-            # [16] = Managed Money Long [17] = Managed Money Short
-            # [7]  = Non-Commercial Long [8] = Non-Commercial Short
-            # [9]  = Non-Commercial Spreading
-            # [5]  = Open Interest
-            oi          = _int(row[5])
-            nc_long     = _int(row[7])
-            nc_short    = _int(row[8])
-            nc_net      = nc_long - nc_short
-            comm_long   = _int(row[12]) if len(row) > 12 else 0
-            comm_short  = _int(row[13]) if len(row) > 13 else 0
-            comm_net    = comm_long - comm_short
+            # Legacy COT column indices (f_year.txt):
+            #  [5] Open Interest
+            #  [6] Non-Commercial Long   (hedge funds)
+            #  [7] Non-Commercial Short
+            #  [9] Commercial Long       (banks/producers — "smart money")
+            # [10] Commercial Short
+            oi        = _int(row[5])
+            nc_long   = _int(row[6])
+            nc_short  = _int(row[7])
+            nc_net    = nc_long - nc_short
+            comm_long  = _int(row[9])  if len(row) > 9  else 0
+            comm_short = _int(row[10]) if len(row) > 10 else 0
+            comm_net   = comm_long - comm_short
 
-            nc_net_pct  = round(nc_net / oi * 100, 1) if oi else 0.0
+            nc_net_pct = round(nc_net / oi * 100, 1) if oi else 0.0
 
-            # Week-over-week change
+            # Week-over-week change in hedge fund net
             net_change = 0
             if prev:
-                prev_nc_long  = _int(prev[7])
-                prev_nc_short = _int(prev[8])
-                prev_nc_net   = prev_nc_long - prev_nc_short
-                net_change    = nc_net - prev_nc_net
+                prev_nc_net = _int(prev[6]) - _int(prev[7])
+                net_change  = nc_net - prev_nc_net
 
-            # Crowding: how extreme is the position vs a ±100k net range
-            crowd_raw    = abs(nc_net) / max(oi * 0.3, 1)
-            crowding     = min(int(crowd_raw * 100), 100)
+            # Historical percentile — rank current net against all rows in file
+            # Gives us the research-backed <20th / >80th percentile thresholds
+            all_nets = [_int(r[6]) - _int(r[7]) for r in rows if len(r) > 7]
+            if len(all_nets) >= 4:
+                sorted_nets = sorted(all_nets)
+                rank = sorted_nets.index(min(all_nets, key=lambda x: abs(x - nc_net)))
+                percentile = round(rank / len(sorted_nets) * 100, 1)
+            else:
+                percentile = 50.0
 
-            # Signal logic
-            if nc_net_pct > 20:
+            # Crowding: abs(net) as fraction of 30% of OI
+            crowd_raw = abs(nc_net) / max(oi * 0.3, 1)
+            crowding  = min(int(crowd_raw * 100), 100)
+
+            # Consecutive weeks in same direction
+            weeks_of_data = 0
+            direction = "long" if nc_net > 0 else "short"
+            for r in reversed(rows):
+                r_net = _int(r[6]) - _int(r[7])
+                if (direction == "long" and r_net > 0) or (direction == "short" and r_net < 0):
+                    weeks_of_data += 1
+                else:
+                    break
+
+            # Signal: use percentile thresholds (research standard)
+            # <20th percentile = extreme short → contrarian BUY signal
+            # >80th percentile = extreme long  → contrarian SELL signal
+            if percentile >= 80:
                 signal = "EXTREME_LONG"
-            elif nc_net_pct > 8:
+            elif percentile >= 60:
                 signal = "BULLISH"
-            elif nc_net_pct < -20:
+            elif percentile <= 20:
                 signal = "EXTREME_SHORT"
-            elif nc_net_pct < -8:
+            elif percentile <= 40:
                 signal = "BEARISH"
             else:
                 signal = "NEUTRAL"
 
-            # If extreme AND reversing, that's a contrarian signal
-            if signal in ("EXTREME_LONG", "EXTREME_SHORT") and abs(net_change) > 5000:
-                direction_of_change = "unwinding" if (
+            # If extreme AND unwinding → strongest contrarian signal
+            if signal in ("EXTREME_LONG", "EXTREME_SHORT") and abs(net_change) > 2000:
+                unwinding = (
                     (signal == "EXTREME_LONG"  and net_change < 0) or
                     (signal == "EXTREME_SHORT" and net_change > 0)
-                ) else "extending"
-                if direction_of_change == "unwinding":
+                )
+                if unwinding:
                     signal = f"{signal}_UNWINDING"
 
+            logger.debug(
+                f"[COT] {instrument}: net={nc_net:+,} ({nc_net_pct:+.1f}% OI) "
+                f"pctile={percentile:.0f} signal={signal} weeks={weeks_of_data}"
+            )
+
             return {
-                "instrument":        instrument,
-                "report_date":       report_date,
-                "noncomm_long":      nc_long,
-                "noncomm_short":     nc_short,
-                "noncomm_net":       nc_net,
-                "noncomm_net_pct_oi": nc_net_pct,
-                "comm_long":         comm_long,
-                "comm_short":        comm_short,
-                "comm_net":          comm_net,
-                "open_interest":     oi,
-                "net_change_week":   net_change,
-                "positioning_signal": signal,
-                "crowding_score":    crowding,
+                "instrument":           instrument,
+                "report_date":          report_date,
+                "noncomm_long":         nc_long,
+                "noncomm_short":        nc_short,
+                "noncomm_net":          nc_net,
+                "noncomm_net_pct_oi":   nc_net_pct,
+                "noncomm_percentile":   percentile,   # <20 = extreme short; >80 = extreme long
+                "comm_long":            comm_long,
+                "comm_short":           comm_short,
+                "comm_net":             comm_net,
+                "open_interest":        oi,
+                "net_change_week":      net_change,
+                "weeks_of_data":        weeks_of_data,
+                "positioning_signal":   signal,
+                "crowding_score":       crowding,
             }
         except (IndexError, ValueError) as e:
-            logger.debug(f"[COT] Parse error for {instrument}: {e}")
+            logger.warning(f"[COT] Parse error for {instrument}: {e} (row has {len(row)} cols)")
             return self._empty(instrument)
 
     @staticmethod
     def _empty(instrument: str) -> dict:
         return {
-            "instrument":         instrument,
-            "report_date":        None,
-            "noncomm_long":       0,
-            "noncomm_short":      0,
-            "noncomm_net":        0,
-            "noncomm_net_pct_oi": 0.0,
-            "comm_long":          0,
-            "comm_short":         0,
-            "comm_net":           0,
-            "open_interest":      0,
-            "net_change_week":    0,
-            "positioning_signal": "UNKNOWN",
-            "crowding_score":     0,
+            "instrument":           instrument,
+            "report_date":          None,
+            "noncomm_long":         0,
+            "noncomm_short":        0,
+            "noncomm_net":          0,
+            "noncomm_net_pct_oi":   0.0,
+            "noncomm_percentile":   50.0,   # unknown — treat as neutral
+            "comm_long":            0,
+            "comm_short":           0,
+            "comm_net":             0,
+            "open_interest":        0,
+            "net_change_week":      0,
+            "weeks_of_data":        0,
+            "positioning_signal":   "UNKNOWN",
+            "crowding_score":       0,
         }
 
 
