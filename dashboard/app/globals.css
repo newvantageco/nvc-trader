@@ -2,26 +2,31 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ─── NVC Terminal Design Tokens ─────────────────────────────────────────── */
+/* ─── NVC Terminal Design Tokens — Bloomberg-grade London trading palette ─── */
 :root {
-  --bg-base:       #0a0e14;
-  --bg-surface:    #111827;
-  --bg-elevated:   #1a2235;
-  --bg-hover:      #1e2d42;
+  /* Backgrounds — true black base, not blue-grey */
+  --bg-base:       #080c10;   /* near-black, harder than before */
+  --bg-surface:    #0d1117;   /* header/sidebar — GitHub dark reference */
+  --bg-elevated:   #161b22;   /* cards, inputs */
+  --bg-hover:      #1c2333;
 
-  --border:        #1e293b;
-  --border-bright: #334155;
+  /* Borders — visible but not distracting */
+  --border:        #21262d;
+  --border-bright: #30363d;
 
-  --text-primary:  #f1f5f9;
-  --text-secondary:#94a3b8;
-  --text-muted:    #475569;
+  /* Text — Bloomberg uses very bright primary, dim secondary */
+  --text-primary:  #e6edf3;   /* near-white */
+  --text-secondary:#8b949e;
+  --text-muted:    #484f58;
 
-  --accent:        #f59e0b;   /* NVC amber */
-  --accent-dim:    #78350f;
+  /* Accent — NVC amber, close to Bloomberg orange */
+  --accent:        #f0a500;
+  --accent-dim:    #7d4e00;
 
-  --bull:          #10b981;   /* green */
-  --bear:          #ef4444;   /* red */
-  --neutral:       #64748b;
+  /* P&L colours — professional green/red, not too saturated */
+  --bull:          #3fb950;   /* GitHub Actions green */
+  --bear:          #f85149;   /* GitHub Actions red */
+  --neutral:       #6e7681;
 
   --font-mono:     'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
   --font-ui:       'Inter', system-ui, sans-serif;

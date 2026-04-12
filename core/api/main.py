@@ -251,6 +251,26 @@ async def get_account():
     return metrics
 
 
+@app.get("/prices")
+async def get_prices(symbols: str = "GBPUSD,EURUSD,XAUUSD,USDJPY,USOIL"):
+    """Live bid/ask for a comma-separated list of instruments."""
+    from core.bridge.oanda_client import OandaClient
+    client = OandaClient()
+    instruments = [s.strip() for s in symbols.split(",") if s.strip()]
+    import asyncio
+    prices = await asyncio.gather(
+        *[client.get_price(sym) for sym in instruments],
+        return_exceptions=True,
+    )
+    result = {}
+    for sym, p in zip(instruments, prices):
+        if isinstance(p, Exception):
+            result[sym] = {"bid": 0.0, "ask": 0.0, "spread": 0.0}
+        else:
+            result[sym] = p
+    return result
+
+
 @app.get("/cycles")
 async def get_cycles(limit: int = 20):
     cycles = await db.select("agent_cycles")
