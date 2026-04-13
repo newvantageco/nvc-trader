@@ -10,27 +10,31 @@ from typing import Any
 
 @dataclass
 class ConfluenceScore:
-    instrument:     str
-    direction:      str           # BUY / SELL / NEUTRAL
-    total_score:    float         # 0.0 – 1.0 (≥0.60 = tradeable)
-    ta_score:       float
-    sentiment_score: float
-    momentum_score: float
-    macro_score:    float
-    atr:            float         # for SL/TP calculation
-    entry_price:    float
-    stop_loss:      float
-    take_profit:    float
-    reasons:        list[str] = field(default_factory=list)
-    tradeable:      bool = False
+    instrument:          str
+    direction:           str           # BUY / SELL / NEUTRAL
+    total_score:         float         # 0.0 – 1.0 (≥0.60 = tradeable)
+    ta_score:            float
+    sentiment_score:     float
+    momentum_score:      float
+    macro_score:         float
+    risk_sentiment_score: float        # TSLA/SPX/JPM risk appetite factor
+    atr:                 float         # for SL/TP calculation
+    entry_price:         float
+    stop_loss:           float
+    take_profit:         float
+    reasons:             list[str] = field(default_factory=list)
+    tradeable:           bool = False
 
 
 # Weights — must sum to 1.0
+# Risk sentiment (TSLA/SPX/JPM) replaces some macro weight — it's real-time
+# whereas macro rate differentials are slow-moving.
 WEIGHTS = {
-    "ta":        0.40,
-    "sentiment": 0.35,
-    "momentum":  0.15,
-    "macro":     0.10,
+    "ta":             0.35,
+    "sentiment":      0.30,
+    "momentum":       0.15,
+    "macro":          0.10,
+    "risk_sentiment": 0.10,   # TSLA + SPX + JPM equity risk barometer
 }
 
 # Minimum score to generate a signal
@@ -46,11 +50,12 @@ class ConfluenceEngine:
 
     def compute(
         self,
-        instrument:      str,
-        ta_analysis:     dict,
-        sentiment_data:  dict,
-        price_data:      dict,
-        macro_data:      dict | None = None,
+        instrument:        str,
+        ta_analysis:       dict,
+        sentiment_data:    dict,
+        price_data:        dict,
+        macro_data:        dict | None = None,
+        risk_sentiment:    dict | None = None,
     ) -> ConfluenceScore:
 
         entry_price = price_data.get("ask", 0.0)
@@ -76,12 +81,18 @@ class ConfluenceEngine:
         # ── 4. Macro score ────────────────────────────────────────────────────
         macro_score = self._score_macro(macro_data or {})
 
+        # ── 5. Risk sentiment score (TSLA / SPX / JPM) ───────────────────────
+        risk_sent_score, risk_sent_direction = self._score_risk_sentiment(
+            instrument, risk_sentiment or {}
+        )
+
         # ── Weighted composite ────────────────────────────────────────────────
         total = (
-            ta_score        * WEIGHTS["ta"] +
-            sentiment_score * WEIGHTS["sentiment"] +
-            momentum_score  * WEIGHTS["momentum"] +
-            macro_score     * WEIGHTS["macro"]
+            ta_score         * WEIGHTS["ta"] +
+            sentiment_score  * WEIGHTS["sentiment"] +
+            momentum_score   * WEIGHTS["momentum"] +
+            macro_score      * WEIGHTS["macro"] +
+            risk_sent_score  * WEIGHTS["risk_sentiment"]
         )
 
         # ── Determine direction ───────────────────────────────────────────────
@@ -93,6 +104,9 @@ class ConfluenceEngine:
                     (1 if sent_direction == "SELL"   else 0) * WEIGHTS["sentiment"] +
                     (1 if mom_direction  == "SELL"   else 0) * WEIGHTS["momentum"],
         }
+
+        votes["BUY"]  += (1 if risk_sent_direction == "BUY"  else 0) * WEIGHTS["risk_sentiment"]
+        votes["SELL"] += (1 if risk_sent_direction == "SELL" else 0) * WEIGHTS["risk_sentiment"]
 
         if votes["BUY"] > votes["SELL"] + 0.10:
             direction = "BUY"
@@ -106,25 +120,28 @@ class ConfluenceEngine:
         sl, tp = self._compute_sl_tp(instrument, direction, entry_price, atr)
 
         # ── Build reasons ─────────────────────────────────────────────────────
+        rs_note = risk_sentiment.get("note", "") if risk_sentiment else ""
         reasons = ta_reasons + [
             f"Sentiment: {sent_bias} ({sent_raw:+.2f}, {sent_count} articles)",
             f"Momentum score: {momentum_score:.2f}",
+            f"Risk appetite: {rs_note}" if rs_note else "Risk appetite: unavailable",
         ]
 
         return ConfluenceScore(
-            instrument      = instrument,
-            direction       = direction,
-            total_score     = round(total, 4),
-            ta_score        = round(ta_score, 4),
-            sentiment_score = round(sentiment_score, 4),
-            momentum_score  = round(momentum_score, 4),
-            macro_score     = round(macro_score, 4),
-            atr             = atr,
-            entry_price     = entry_price,
-            stop_loss       = sl,
-            take_profit     = tp,
-            reasons         = reasons,
-            tradeable       = total >= THRESHOLD_HALF and direction != "NEUTRAL",
+            instrument           = instrument,
+            direction            = direction,
+            total_score          = round(total, 4),
+            ta_score             = round(ta_score, 4),
+            sentiment_score      = round(sentiment_score, 4),
+            momentum_score       = round(momentum_score, 4),
+            macro_score          = round(macro_score, 4),
+            risk_sentiment_score = round(risk_sent_score, 4),
+            atr                  = atr,
+            entry_price          = entry_price,
+            stop_loss            = sl,
+            take_profit          = tp,
+            reasons              = reasons,
+            tradeable            = total >= THRESHOLD_HALF and direction != "NEUTRAL",
         )
 
     # ─── Private scorers ──────────────────────────────────────────────────────
@@ -171,6 +188,37 @@ class ConfluenceEngine:
             return 0.60, "BUY" if rsi_mom > 0 else "NEUTRAL"
         if rsi_val < 35:
             return 0.60, "SELL" if rsi_mom < 0 else "NEUTRAL"
+        return 0.50, "NEUTRAL"
+
+    def _score_risk_sentiment(self, instrument: str, rs: dict) -> tuple[float, str]:
+        """
+        Score from TSLA/SPX/JPM risk appetite reading.
+
+        HIGH risk appetite  → favours risk-on pairs (AUD, NZD, GBP, CAD) long, USD short
+        LOW  risk appetite  → favours risk-off pairs (JPY, CHF, Gold) long, risk pairs short
+        NEUTRAL             → no additional conviction either way (0.5)
+        """
+        if not rs:
+            return 0.50, "NEUTRAL"
+
+        appetite = rs.get("risk_appetite", "NEUTRAL")
+        score    = rs.get("score", 0.5)            # 0.0 extreme risk-off → 1.0 extreme risk-on
+
+        signal_map = rs.get("signal_for_pair", {})
+        pair_signal = signal_map.get(instrument, "neutral")
+
+        if pair_signal == "neutral" or appetite == "NEUTRAL":
+            return 0.50, "NEUTRAL"
+
+        if pair_signal.endswith("_BUY"):
+            # Risk appetite confirms BUY direction for this pair
+            direction_score = 0.4 + score * 0.6   # 0.4–1.0 depending on strength
+            return round(direction_score, 4), "BUY"
+        elif pair_signal.endswith("_SELL"):
+            # Risk appetite confirms SELL direction for this pair
+            direction_score = 0.4 + (1.0 - score) * 0.6
+            return round(direction_score, 4), "SELL"
+
         return 0.50, "NEUTRAL"
 
     def _score_macro(self, macro: dict) -> float:

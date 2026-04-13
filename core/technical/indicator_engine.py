@@ -48,17 +48,32 @@ class IndicatorEngine:
         }
 
     async def get_price_data(self, instrument: str, timeframe: str = "H1") -> dict:
-        df = await self._get_ohlcv(instrument, timeframe)
-        latest = df.iloc[-1]
-        return {
-            "instrument": instrument,
-            "timeframe": timeframe,
-            "bid": float(latest["close"]) - 0.00005,
-            "ask": float(latest["close"]) + 0.00005,
-            "high_24h": float(df.tail(24)["high"].max()),
-            "low_24h": float(df.tail(24)["low"].min()),
-            "last_candles": df.tail(20)[["open", "high", "low", "close", "volume"]].to_dict("records"),
-        }
+        from core.bridge.oanda_client import DRY_RUN_PRICES
+        try:
+            df = await self._get_ohlcv(instrument, timeframe)
+            latest = df.iloc[-1]
+            mid = float(latest["close"])
+            return {
+                "instrument": instrument,
+                "timeframe": timeframe,
+                "bid": mid - 0.00005,
+                "ask": mid + 0.00005,
+                "high_24h": float(df.tail(24)["high"].max()),
+                "low_24h": float(df.tail(24)["low"].min()),
+                "last_candles": df.tail(20)[["open", "high", "low", "close", "volume"]].to_dict("records"),
+            }
+        except Exception as exc:
+            logger.warning(f"[TA] get_price_data fallback for {instrument}: {exc}")
+            mid = DRY_RUN_PRICES.get(instrument, 1.09000)
+            return {
+                "instrument": instrument,
+                "timeframe": timeframe,
+                "bid": mid - 0.00005,
+                "ask": mid + 0.00005,
+                "high_24h": mid * 1.005,
+                "low_24h": mid * 0.995,
+                "last_candles": [],
+            }
 
     def _compute_indicators(self, df: pd.DataFrame) -> dict:
         c = df["close"]
@@ -143,29 +158,37 @@ class IndicatorEngine:
             rsi = data.get("rsi", {})
             macd = data.get("macd", {})
 
-            # EMA trend
-            if ema.get("ema9_above_21") and ema.get("price_above_200"):
-                bull_votes += w
-            elif not ema.get("ema9_above_21") and not ema.get("price_above_200"):
-                bear_votes += w
+            # Accumulate sub-scores per TF (0–2 possible), then normalise to w
+            tf_bull = 0.0
+            tf_bear = 0.0
 
-            # RSI
+            # EMA trend (weight 1.0)
+            if ema.get("ema9_above_21") and ema.get("price_above_200"):
+                tf_bull += 1.0
+            elif not ema.get("ema9_above_21") and not ema.get("price_above_200"):
+                tf_bear += 1.0
+
+            # RSI (weight 0.5)
             rsi_val = rsi.get("value", 50)
             if 45 < rsi_val < 70 and rsi.get("momentum", 0) > 0:
-                bull_votes += w * 0.5
+                tf_bull += 0.5
             elif 30 < rsi_val < 55 and rsi.get("momentum", 0) < 0:
-                bear_votes += w * 0.5
+                tf_bear += 0.5
 
-            # MACD
+            # MACD (weight 0.5)
             if macd.get("bullish_cross"):
-                bull_votes += w * 0.5
+                tf_bull += 0.5
             elif macd.get("bearish_cross"):
-                bear_votes += w * 0.5
+                tf_bear += 0.5
+
+            # Normalise each TF contribution to max w (divide by 2.0 = max sub-score)
+            bull_votes += w * (tf_bull / 2.0)
+            bear_votes += w * (tf_bear / 2.0)
 
         if total == 0:
             return "neutral", 0.5
 
-        bull_score = bull_votes / total
+        bull_score = bull_votes / total   # now in [0.0, 1.0]
         bear_score = bear_votes / total
 
         if bull_score > bear_score + 0.15:
@@ -271,13 +294,32 @@ class IndicatorEngine:
                 auto_adjust=True,
             )
             if df is not None and len(df) >= 50:
-                df.columns = [c.lower() for c in df.columns]
-                logger.info(f"[OHLCV] yfinance fallback used for {instrument} {timeframe}")
-                return df.dropna()
+                # yfinance >= 0.2 returns MultiIndex columns like ('Close', 'EURUSD=X')
+                # Flatten to single level before lowercasing
+                if hasattr(df.columns, 'levels'):
+                    df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+                df.columns = [str(c).lower() for c in df.columns]
+                # Ensure required columns exist
+                required = {"open", "high", "low", "close"}
+                if not required.issubset(set(df.columns)):
+                    logger.warning(f"[OHLCV] yfinance missing columns for {instrument}: {list(df.columns)}")
+                else:
+                    if "volume" not in df.columns:
+                        df["volume"] = 0.0
+                    logger.info(f"[OHLCV] yfinance fallback used for {instrument} {timeframe} ({len(df)} bars)")
+                    return df.dropna(subset=["open", "high", "low", "close"])
         except Exception as exc:
             logger.error(f"[OHLCV] yfinance also failed for {instrument} {timeframe}: {exc}")
 
-        # ── Both failed — refuse to trade on fake data ─────────────────────────
+        # ── Fallback 3: Stooq (free, no auth, reliable FX/commodity CSVs) ────────
+        try:
+            df = await self._fetch_stooq(instrument, timeframe)
+            if df is not None and len(df) >= 50:
+                return df
+        except Exception as exc:
+            logger.error(f"[OHLCV] Stooq also failed for {instrument} {timeframe}: {exc}")
+
+        # ── All three failed — refuse to trade on fake data ────────────────────
         raise RuntimeError(
             f"No OHLCV data available for {instrument} {timeframe} — "
             f"OANDA and yfinance both failed. Refusing to use synthetic data."
@@ -290,8 +332,9 @@ class IndicatorEngine:
         account_id = os.environ.get("OANDA_ACCOUNT_ID", "")
         is_live    = os.environ.get("OANDA_LIVE", "false").lower() == "true"
 
-        if not api_key or not account_id:
-            return None  # Not configured — fall through to yfinance
+        if not api_key:
+            return None  # No API key — fall through to yfinance
+        # account_id is NOT required for the public candles endpoint
 
         base_url = "https://api-fxtrade.oanda.com" if is_live else "https://api-fxpractice.oanda.com"
 
@@ -329,3 +372,58 @@ class IndicatorEngine:
                 })
 
         return pd.DataFrame(rows) if rows else None
+
+    async def _fetch_stooq(self, instrument: str, timeframe: str) -> pd.DataFrame | None:
+        """
+        Stooq.com free historical data — no auth required.
+        Covers FX, indices, commodities. Data is end-of-day or intraday depending on instrument.
+        URL: https://stooq.com/q/d/l/?s=<symbol>&i=<interval>
+        Interval: d=daily, w=weekly (no intraday for FX on Stooq)
+        For intraday we use daily bars and treat them as D1 equivalent.
+        """
+        import io
+        import aiohttp
+
+        stooq_map = {
+            "EURUSD": "eurusd", "GBPUSD": "gbpusd", "USDJPY": "usdjpy",
+            "AUDUSD": "audusd", "USDCAD": "usdcad", "NZDUSD": "nzdusd",
+            "USDCHF": "usdchf", "EURJPY": "eurjpy", "GBPJPY": "gbpjpy",
+            "XAUUSD": "xauusd", "XAGUSD": "xagusd",
+            "USOIL":  "cl.f",   "UKOIL":  "bz.f",   "NATGAS": "ng.f",
+        }
+        sym = stooq_map.get(instrument)
+        if not sym:
+            return None
+
+        url = f"https://stooq.com/q/d/l/?s={sym}&i=d"
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=15),
+            headers={"User-Agent": "Mozilla/5.0 (compatible; NVC-Trader/1.0)"},
+        ) as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    return None
+                text = await resp.text()
+
+        if not text or "No data" in text or len(text) < 100:
+            return None
+
+        df = pd.read_csv(io.StringIO(text))
+        df.columns = [c.strip().lower() for c in df.columns]
+
+        # Stooq columns: date, open, high, low, close, volume
+        col_map = {"date": "date", "open": "open", "high": "high", "low": "low",
+                   "close": "close", "vol": "volume", "volume": "volume"}
+        df = df.rename(columns={c: col_map.get(c, c) for c in df.columns})
+
+        required = {"open", "high", "low", "close"}
+        if not required.issubset(set(df.columns)):
+            return None
+
+        if "volume" not in df.columns:
+            df["volume"] = 0.0
+
+        df = df[["open", "high", "low", "close", "volume"]].dropna()
+        if len(df) >= 50:
+            logger.info(f"[OHLCV] Stooq fallback used for {instrument} {timeframe} ({len(df)} bars)")
+        return df if len(df) >= 50 else None

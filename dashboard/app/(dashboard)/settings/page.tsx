@@ -18,7 +18,7 @@ interface Settings {
 }
 
 const DEFAULTS: Settings = {
-  max_risk_pct: 1.0, max_daily_dd_pct: 3.0, max_weekly_dd_pct: 6.0,
+  max_risk_pct: 1.0, max_daily_dd_pct: 2.0, max_weekly_dd_pct: 5.0,
   max_open_trades: 8, signal_threshold: 0.60, enabled_instruments: WATCHLIST.slice(),
   agent_interval_min: 15,
 }

@@ -291,6 +291,24 @@ TRADING_TOOLS: list[dict[str, Any]] = [
     },
 
     {
+        "name": "get_risk_sentiment",
+        "description": (
+            "Get real-time global risk appetite from Tesla (TSLA), S&P 500 (SPX), and "
+            "JP Morgan Chase (JPM) equity price action. "
+            "TSLA is the highest-beta risk barometer: TSLA +5% 5d = strong risk-on = AUD/NZD/GBP outperform, USD weakens. "
+            "TSLA -5% 5d = risk-off = JPY/CHF/Gold rally. "
+            "JPM stock signals credit conditions: JPM rising = banks healthy = benign credit = risk-on. "
+            "Also returns JP Morgan's published 2026 FX price targets (EURUSD 1.20, USDJPY 164, XAUUSD 3200). "
+            "Use this in Step 3 (Positioning) alongside COT data for a complete crowd/institutional picture."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+
+    {
         "name": "get_portfolio_analysis",
         "description": (
             "Run portfolio-level financial planning and risk analysis. "
@@ -449,8 +467,55 @@ TRADING_TOOLS: list[dict[str, Any]] = [
                     "description": "Number of the 5 signal factors that align with this trade (0–5)",
                     "default": 3,
                 },
+                "druckenmiller_multiplier": {
+                    "type": "number",
+                    "description": (
+                        "Conviction multiplier from get_trader_analysis.final_multiplier. "
+                        "When provided, overrides the standard factors_aligned lookup. "
+                        "Values: 1.5 (A++/Soros trap), 1.4 (Turtle S2), 1.3 (A+), 1.0 (A), 0.6 (below A)."
+                    ),
+                },
             },
             "required": ["instrument", "entry_price", "stop_loss", "account_equity"],
+        },
+    },
+
+    {
+        "name": "get_trader_analysis",
+        "description": (
+            "Run the Legendary Trader analysis pipeline on a specific setup. "
+            "Applies all 7 historically proven trader methodologies in sequence:\n"
+            "  1. LIVERMORE  — Is this a pivotal structural break (swing high/low)? Only enter at confirmed pivots.\n"
+            "  2. SEYKOTA    — Does 150-day MA confirm the direction? Never fight the master trend.\n"
+            "  3. TURTLES    — Is this a 20-day (System 1) or 55-day (System 2) channel breakout?\n"
+            "  4. PTJ        — Does the setup offer ≥2:1 R:R? PTJ refuses worse setups.\n"
+            "  5. SOROS      — Is the central bank defending an indefensible level? Policy trap = massive trade.\n"
+            "  6. DRUCKENMILLER — What conviction multiplier should be applied to sizing?\n"
+            "  7. SIMONS     — What is the pattern-frequency expectancy score (S/A/B-TIER)?\n\n"
+            "Returns: verdict (ALL SYSTEMS GO / STRONG SETUP / MARGINAL / AVOID), "
+            "green_lights (N/7 traders agree), final_multiplier (use in calculate_position_size), "
+            "and detailed output from each strategy.\n\n"
+            "WHEN TO CALL: after check_edge_filter passes. Pass the final_multiplier as "
+            "druckenmiller_multiplier in calculate_position_size to scale correctly."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "instrument":   {"type": "string", "description": "Trading instrument symbol"},
+                "direction":    {"type": "string", "enum": ["BUY", "SELL"]},
+                "entry":        {"type": "number", "description": "Proposed entry price"},
+                "stop_loss":    {"type": "number", "description": "Proposed stop loss price"},
+                "take_profit":  {"type": "number", "description": "Proposed take profit price"},
+                "atr":          {"type": "number", "description": "ATR value for the instrument"},
+                "edge_score":   {"type": "integer", "description": "Edge filter score (0–8) from check_edge_filter"},
+                "macro_score":  {"type": "number", "description": "Macro confidence score 0.0–1.0"},
+                "active_patterns": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Pattern names already detected (e.g. ['london_breakout', 'institutional_divergence'])",
+                },
+            },
+            "required": ["instrument", "direction", "entry", "stop_loss", "take_profit", "atr", "edge_score"],
         },
     },
 

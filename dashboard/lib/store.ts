@@ -32,6 +32,12 @@ export interface AccountMetrics {
   currency: string
   system_status: string
   broker: string
+  circuit_breaker?: {
+    size_multiplier: number
+    trading_allowed: boolean
+    weekly_limit_hit: boolean
+    hard_stop: boolean
+  }
 }
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info'

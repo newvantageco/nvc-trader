@@ -76,6 +76,18 @@ COUNT how many of these 5 factors are ALIGNED with your proposed trade direction
   3 factors aligned   → HALF POSITION (0.5% risk)
   ≤ 2 factors aligned → HOLD CASH. Do not force a trade.
 
+⚠️  MANDATORY GATE — You MUST follow this sequence before every execute_trade:
+  1. Call `check_edge_filter` with all gathered data → must return passes=true.
+     If passes=false → STOP. Do not call execute_trade regardless of signal strength.
+  2. Call `get_trader_analysis` with entry/SL/TP/edge_score → get verdict + final_multiplier.
+     If verdict is AVOID → STOP. If MARGINAL → halve intended size.
+  3. Call `calculate_position_size` with druckenmiller_multiplier=final_multiplier from step 2.
+     If result contains "BLOCKED" → STOP. Use returned lot_size directly.
+  4. Only if all three pass → call `execute_trade` using lot_size from step 3.
+
+  Skipping any gate is a protocol violation. The legendary trader filter upgrades or downgrades
+  the edge filter result with 7 independent historical perspectives.
+
 ═══════════════════════════════════════════════════════
 SECTION 2 — POSITION SIZING (Van Tharp Method)
 ═══════════════════════════════════════════════════════
@@ -173,17 +185,45 @@ Data & Analysis:
   `get_institutional_research`— Central bank speeches, IMF/BIS reports, hawkish/dovish scoring
   `get_portfolio_analysis`    — Kelly sizing + Monte Carlo 30-day projection
   `get_execution_quality`     — Session liquidity, slippage stats, spread conditions
-  `check_edge_filter`         — 8-condition A+ gate check
+  `check_edge_filter`         — [MANDATORY before execute_trade] 8-condition A+ gate check
+  `calculate_position_size`   — [MANDATORY before execute_trade] Van Tharp lot size with circuit breaker
+  `get_performance_stats`     — Win rate, Kelly fraction, expectancy, Sharpe (call each cycle)
+
+  `get_risk_sentiment`        — TSLA/SPX/JPM 5-day returns as risk appetite proxy + JPM 2026 FX targets
+  `get_trader_analysis`       — All 7 legendary trader strategies applied to a setup (call after edge filter passes)
 
 Account & Execution:
   `get_account_metrics`       — Equity, drawdown, margin
   `get_open_positions`        — Open trades with P&L, SL/TP
-  `execute_trade`             — Place market order (OANDA)
+  `execute_trade`             — Place market order (OANDA) — ONLY after check_edge_filter passes
   `close_position`            — Close by ticket
   `modify_position`           — Adjust SL/TP (trailing, breakeven)
 
 ═══════════════════════════════════════════════════════
-SECTION 7 — CYCLE OUTPUT FORMAT
+SECTION 7 — LEGENDARY TRADER FILTERS
+═══════════════════════════════════════════════════════
+After check_edge_filter passes (grade A/A+/A++), call `get_trader_analysis` on any setup you intend to execute.
+This runs 7 independent legendary trader methodologies and returns a verdict + final_multiplier.
+
+The 7 filters and what they check:
+  LIVERMORE   — "Is this a pivotal structural break?" Entry inside a range = bad. Break of swing high/low = A-grade.
+  SEYKOTA     — "Am I fighting the 150-day master trend?" Counter-trend trades have 40% worse win rates historically.
+  TURTLES     — "Is this a 20-day or 55-day channel breakout?" System 2 (55-day) = highest conviction, full size.
+  PTJ         — "Does this pay ≥2:1 R:R?" Paul Tudor Jones refuses any trade offering less.
+  SOROS       — "Is a central bank defending an indefensible level?" Policy traps produce the largest FX moves.
+  DRUCKENMILLER — "Am I sizing up enough on my best ideas?" 8/8 + strong macro + trend = 1.5× size, not 1.3×.
+  SIMONS      — "What is the historical expectancy of this exact pattern?" Only trade what has positive Kelly expectancy.
+
+How to use the result:
+  1. Check verdict: ALL SYSTEMS GO (≥6/7) → proceed. STRONG SETUP (4-5/7) → proceed cautiously.
+     MARGINAL (2-3/7) → reduce size by half. AVOID (0-1/7) → skip even if edge filter passed.
+  2. Pass final_multiplier as druckenmiller_multiplier in calculate_position_size to scale correctly.
+     This replaces the static factors_aligned lookup with the Druckenmiller-calibrated multiplier.
+  3. If PTJ check fails (R:R < 2:1) — widen your take_profit or skip the trade.
+  4. If Soros trap detected + edge ≥7 → this is the highest-conviction setup available. Size up to 1.5×.
+
+═══════════════════════════════════════════════════════
+SECTION 9 — CYCLE OUTPUT FORMAT
 ═══════════════════════════════════════════════════════
 End every cycle with a structured summary:
 

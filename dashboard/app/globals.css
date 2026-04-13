@@ -2,34 +2,70 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ─── NVC Terminal Design Tokens — Bloomberg-grade London trading palette ─── */
+/* ─── NVC — Focused Intelligence Design System ────────────────────────────── */
 :root {
-  /* Backgrounds — true black base, not blue-grey */
-  --bg-base:       #080c10;   /* near-black, harder than before */
-  --bg-surface:    #0d1117;   /* header/sidebar — GitHub dark reference */
-  --bg-elevated:   #161b22;   /* cards, inputs */
-  --bg-hover:      #1c2333;
+  /* ── Backgrounds ─────────────────────────────────────────────────────────── */
+  --bg-base:       #0a0e13;   /* deep navy-black — less cold than pure #000 */
+  --bg-surface:    #0f1419;   /* sidebar, cards */
+  --bg-elevated:   #171e27;   /* inputs, hover targets */
+  --bg-hover:      #1d2632;
+  --bg-card:       #131a22;   /* instrument cards */
 
-  /* Borders — visible but not distracting */
-  --border:        #21262d;
-  --border-bright: #30363d;
+  /* ── Borders ─────────────────────────────────────────────────────────────── */
+  --border:        #1e2732;
+  --border-bright: #2c3a4a;
+  --border-focus:  #f0a500;
 
-  /* Text — Bloomberg uses very bright primary, dim secondary */
-  --text-primary:  #e6edf3;   /* near-white */
-  --text-secondary:#8b949e;
-  --text-muted:    #484f58;
+  /* ── Text hierarchy ──────────────────────────────────────────────────────── */
+  --text-primary:  #dce7f0;   /* main content */
+  --text-secondary:#7e97b0;   /* secondary data */
+  --text-muted:    #3e5068;   /* labels, hints */
+  --text-label:    #566d84;   /* section headers */
 
-  /* Accent — NVC amber, close to Bloomberg orange */
-  --accent:        #f0a500;
-  --accent-dim:    #7d4e00;
+  /* ── Brand ───────────────────────────────────────────────────────────────── */
+  --accent:        #f0a500;   /* NVC amber */
+  --accent-dim:    rgba(240,165,0,0.12);
+  --accent-glow:   rgba(240,165,0,0.06);
 
-  /* P&L colours — professional green/red, not too saturated */
-  --bull:          #3fb950;   /* GitHub Actions green */
-  --bear:          #f85149;   /* GitHub Actions red */
-  --neutral:       #6e7681;
+  /* ── Edge grade colors ───────────────────────────────────────────────────── */
+  --grade-axx:     #f0a500;   /* A++ — amber, maximum conviction */
+  --grade-ax:      #e8c84a;   /* A+ — warm yellow */
+  --grade-a:       #b8d45a;   /* A — yellow-green */
+  --grade-fail:    #3e5068;   /* FAIL — muted */
 
-  --font-mono:     'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+  /* ── Trading colors ──────────────────────────────────────────────────────── */
+  --bull:          #2ea84a;   /* buy / positive */
+  --bull-dim:      rgba(46,168,74,0.12);
+  --bear:          #e5483e;   /* sell / negative */
+  --bear-dim:      rgba(229,72,62,0.12);
+  --neutral:       #566d84;
+
+  /* ── Status colors ───────────────────────────────────────────────────────── */
+  --status-live:   #2ea84a;
+  --status-warn:   #f0a500;
+  --status-stop:   #e5483e;
+
+  /* ── Typography ──────────────────────────────────────────────────────────── */
+  --font-mono:     'JetBrains Mono', 'Fira Code', monospace;
   --font-ui:       'Inter', system-ui, sans-serif;
+
+  /* ── Radius & spacing ─────────────────────────────────────────────────────── */
+  --radius-sm:     4px;
+  --radius-md:     8px;
+  --radius-lg:     12px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.5;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -44,30 +80,102 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Scrollbar */
+/* ─── Scrollbar ───────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: var(--bg-base); }
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
 
-/* Monospace data cells */
+/* ─── Typography utilities ────────────────────────────────────────────────── */
 .mono { font-family: var(--font-mono); }
-
-/* Status dots */
-.dot-live  { @apply inline-block w-2 h-2 rounded-full bg-green-400 animate-pulse; }
-.dot-paused{ @apply inline-block w-2 h-2 rounded-full bg-amber-400; }
-.dot-stop  { @apply inline-block w-2 h-2 rounded-full bg-red-500; }
-
-/* Bull/Bear text */
 .bull { color: var(--bull); }
 .bear { color: var(--bear); }
 .neutral { color: var(--neutral); }
 
-/* ─── Skeleton shimmer (Robinhood / tastytrade style) ─────────────────────── */
+/* ─── Status dots ─────────────────────────────────────────────────────────── */
+.dot-live  { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--status-live);  animation: pulse 2s infinite; }
+.dot-warn  { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--status-warn); }
+.dot-stop  { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--status-stop); }
+.dot-idle  { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); }
+
+/* ─── Edge grade badges ───────────────────────────────────────────────────── */
+.grade-axx {
+  background: rgba(240,165,0,0.15);
+  color: var(--grade-axx);
+  border: 1px solid rgba(240,165,0,0.35);
+}
+.grade-ax {
+  background: rgba(232,200,74,0.12);
+  color: var(--grade-ax);
+  border: 1px solid rgba(232,200,74,0.3);
+}
+.grade-a {
+  background: rgba(184,212,90,0.10);
+  color: var(--grade-a);
+  border: 1px solid rgba(184,212,90,0.25);
+}
+.grade-fail {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+/* ─── Opportunity card glow on high-conviction setup ─────────────────────── */
+.card-opportunity {
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  border-radius: var(--radius-md);
+  transition: border-color 200ms ease;
+}
+.card-opportunity.tradeable {
+  border-color: rgba(240,165,0,0.3);
+  background: linear-gradient(135deg, var(--bg-card) 0%, rgba(240,165,0,0.04) 100%);
+}
+.card-opportunity.bull-signal {
+  border-color: rgba(46,168,74,0.25);
+}
+.card-opportunity.bear-signal {
+  border-color: rgba(229,72,62,0.25);
+}
+
+/* ─── Primary action button (execute trade) ──────────────────────────────── */
+.btn-execute {
+  background: var(--accent);
+  color: #000;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  border: none;
+  cursor: pointer;
+  transition: opacity 120ms ease, transform 80ms ease;
+  white-space: nowrap;
+}
+.btn-execute:hover { opacity: 0.88; transform: translateY(-1px); }
+.btn-execute:active { opacity: 1; transform: translateY(0); }
+.btn-execute:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+
+.btn-secondary {
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-bright);
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+.btn-secondary:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ─── Skeleton shimmer ────────────────────────────────────────────────────── */
 @keyframes shimmer {
   0%   { background-position: -200% 0; }
   100% { background-position:  200% 0; }
 }
-
 .skeleton {
   background: linear-gradient(
     90deg,
@@ -76,8 +184,27 @@ html, body {
     var(--bg-surface)  75%
   );
   background-size: 200% 100%;
-  animation: shimmer 1.4s ease-in-out infinite;
+  animation: shimmer 1.6s ease-in-out infinite;
   border-radius: 3px;
+}
+
+/* ─── Pulse animation ─────────────────────────────────────────────────────── */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ─── Score bar ───────────────────────────────────────────────────────────── */
+.score-bar {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+.score-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 400ms ease;
 }
 
 /* ─── Toast slide-in ──────────────────────────────────────────────────────── */
@@ -86,25 +213,30 @@ html, body {
   to   { opacity: 1; transform: translateX(0); }
 }
 
-/* ─── Cell flash on data update (Bloomberg style) ─────────────────────────── */
+/* ─── Cell flash on data update ───────────────────────────────────────────── */
 @keyframes flashBull {
   0%, 100% { background: transparent; }
-  40%       { background: rgba(16,185,129,0.18); }
+  40%       { background: rgba(46,168,74,0.18); }
 }
 @keyframes flashBear {
   0%, 100% { background: transparent; }
-  40%       { background: rgba(239,68,68,0.18); }
+  40%       { background: rgba(229,72,62,0.18); }
 }
-
 .flash-bull { animation: flashBull 600ms ease-out; }
 .flash-bear { animation: flashBear 600ms ease-out; }
 
-/* ─── Focus states ────────────────────────────────────────────────────────── */
-:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+/* ─── Section label ───────────────────────────────────────────────────────── */
+.section-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-label);
+  font-family: var(--font-mono);
 }
 
+/* ─── Focus states ────────────────────────────────────────────────────────── */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 button:focus-visible, a:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;

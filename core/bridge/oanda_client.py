@@ -25,6 +25,21 @@ INSTRUMENT_MAP = {
 OANDA_PRACTICE_URL = "https://api-fxpractice.oanda.com"
 OANDA_LIVE_URL     = "https://api-fxtrade.oanda.com"
 
+# OANDA units per "1 standard lot" for each instrument.
+# FX pairs: 1 lot = 100,000 units of base currency.
+# Commodities: derived from position_sizer pip_value consistency:
+#   XAU_USD  pip=$0.01, pip_value=$1.00 → 1 lot = 100 oz
+#   XAG_USD  pip=$0.001, pip_value=$50  → 1 lot = 50,000 oz
+#   WTICO/BCO pip=$0.01, pip_value=$10  → 1 lot = 1,000 barrels
+#   NATGAS   pip=$0.001, pip_value=$10  → 1 lot = 10,000 MMBtu
+UNITS_PER_LOT: dict[str, int] = {
+    "EURUSD": 100_000, "GBPUSD": 100_000, "USDJPY": 100_000,
+    "AUDUSD": 100_000, "USDCAD": 100_000, "NZDUSD": 100_000,
+    "USDCHF": 100_000, "EURJPY": 100_000, "GBPJPY": 100_000,
+    "XAUUSD": 100,     "XAGUSD": 50_000,
+    "USOIL":  1_000,   "UKOIL":  1_000,   "NATGAS": 10_000,
+}
+
 # Approximate mid prices for dry-run/test mode — kept intentionally rough
 # (1-pip precision is enough; these are never used for real P&L)
 DRY_RUN_PRICES: dict[str, float] = {
@@ -44,11 +59,20 @@ class OandaClient:
     """
 
     def __init__(self) -> None:
-        self.api_key    = os.environ.get("OANDA_API_KEY", "")
-        self.account_id = os.environ.get("OANDA_ACCOUNT_ID", "")
         live            = os.environ.get("OANDA_LIVE", "false").lower() == "true"
-        self.base_url   = OANDA_LIVE_URL if live else OANDA_PRACTICE_URL
+        self._load_credentials(live)
+
+    def _load_credentials(self, live: bool) -> None:
+        """Load credentials for the given mode. Safe to call at runtime for hot-switching."""
         self.is_live    = live
+        self.base_url   = OANDA_LIVE_URL if live else OANDA_PRACTICE_URL
+
+        if live:
+            self.api_key    = os.environ.get("OANDA_API_KEY_LIVE") or os.environ.get("OANDA_API_KEY", "")
+            self.account_id = os.environ.get("OANDA_ACCOUNT_ID_LIVE") or os.environ.get("OANDA_ACCOUNT_ID", "")
+        else:
+            self.api_key    = os.environ.get("OANDA_API_KEY_DEMO") or os.environ.get("OANDA_API_KEY", "")
+            self.account_id = os.environ.get("OANDA_ACCOUNT_ID_DEMO") or os.environ.get("OANDA_ACCOUNT_ID", "")
 
         if not self.api_key or not self.account_id:
             logger.warning("[OANDA] API key or account ID not set — running in dry-run mode")
@@ -58,6 +82,15 @@ class OandaClient:
             "Content-Type": "application/json",
             "Accept-Datetime-Format": "RFC3339",
         }
+        logger.info(f"[OANDA] Mode={'LIVE' if live else 'DEMO'} | account={self.account_id} | url={self.base_url}")
+
+    def switch_mode(self, live: bool) -> dict:
+        """Hot-switch between demo and live without restarting. Called by admin API."""
+        old_mode = "LIVE" if self.is_live else "DEMO"
+        self._load_credentials(live)
+        new_mode = "LIVE" if live else "DEMO"
+        logger.warning(f"[OANDA] Trading mode switched: {old_mode} → {new_mode}")
+        return {"previous": old_mode, "current": new_mode, "account_id": self.account_id}
 
     # ─── Account Info ─────────────────────────────────────────────────────────
 
@@ -146,8 +179,12 @@ class OandaClient:
         if not oanda_instrument:
             return {"status": "REJECTED", "reason": f"Instrument {instrument} not in OANDA map"}
 
-        # OANDA units: 1 lot = 100,000 units for forex
-        units = int(lot_size * 100_000)
+        # OANDA units vary by instrument — forex uses 100,000 per lot,
+        # commodities use much smaller multipliers (see UNITS_PER_LOT above).
+        multiplier = UNITS_PER_LOT.get(instrument, 100_000)
+        units = int(lot_size * multiplier)
+        if units == 0:
+            return {"status": "REJECTED", "reason": f"Computed 0 units for {instrument} lot={lot_size}"}
         if direction == "SELL":
             units = -units
 
@@ -165,15 +202,23 @@ class OandaClient:
             }
         }
 
+        # Price precision: 5dp for most FX, 3dp for JPY pairs, 2dp for commodities
+        if "JPY" in instrument:
+            price_fmt = "{:.3f}"
+        elif instrument in ("XAUUSD", "XAGUSD", "USOIL", "UKOIL", "NATGAS"):
+            price_fmt = "{:.2f}"
+        else:
+            price_fmt = "{:.5f}"
+
         # Attach SL/TP if provided
         if sl:
             order_body["order"]["stopLossOnFill"] = {
-                "price": f"{sl:.5f}",
+                "price": price_fmt.format(sl),
                 "timeInForce": "GTC",
             }
         if tp:
             order_body["order"]["takeProfitOnFill"] = {
-                "price": f"{tp:.5f}",
+                "price": price_fmt.format(tp),
                 "timeInForce": "GTC",
             }
 

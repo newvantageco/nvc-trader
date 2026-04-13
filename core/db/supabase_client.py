@@ -31,6 +31,18 @@ class SupabaseClient:
             logger.error(f"[DB] Insert failed on {table}: {exc}")
             return None
 
+    async def upsert(self, table: str, data: dict, on_conflict: str = "id") -> dict | None:
+        """Insert or update — silently ignores duplicate key violations on `on_conflict` column."""
+        if not self._client:
+            logger.debug(f"[DB DRY-RUN] UPSERT {table}: {str(data)[:120]}")
+            return None
+        try:
+            result = self._client.table(table).upsert(data, on_conflict=on_conflict).execute()
+            return result.data[0] if result.data else None
+        except Exception as exc:
+            logger.error(f"[DB] Upsert failed on {table}: {exc}")
+            return None
+
     async def select(
         self,
         table: str,

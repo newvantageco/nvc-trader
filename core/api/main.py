@@ -66,6 +66,20 @@ async def lifespan(app: FastAPI):
     # Startup — validate env before anything else
     _validate_env()
     logger.info("[API] NVC Core Engine starting...")
+
+    # Restore trading mode from DB (survives restarts)
+    try:
+        mode_rows = await db.select("settings", {"key": "trading_mode"})
+        if mode_rows:
+            saved_mode = mode_rows[0].get("value", {}).get("mode", "demo")
+            if saved_mode == "live":
+                agent.zmq.switch_mode(True)
+                logger.info("[STARTUP] Restored trading mode: LIVE")
+            else:
+                logger.info("[STARTUP] Trading mode: DEMO (default)")
+    except Exception as _e:
+        logger.warning(f"[STARTUP] Could not restore trading mode: {_e}")
+
     scheduler.add_job(run_scheduled_cycle,  "cron", minute="*/15")  # Every 15 min
     scheduler.add_job(run_news_scan,         "cron", minute="*/2")   # News scan every 2 min
     scheduler.add_job(run_account_snapshot,  "cron", minute=0)       # Hourly snapshots
@@ -119,21 +133,23 @@ async def run_news_scan():
     fetcher  = NewsFetcher()
     breaking = await fetcher.fetch_breaking_news(minutes=5)
 
-    # Write all breaking articles to news_events (previously an empty table)
+    # Upsert articles — news scan runs every 2 min with a 5-min lookback window,
+    # so the same article appears in 2-3 consecutive scans. Use upsert on url
+    # to avoid the 23505 duplicate key violations that were flooding the logs.
     for article in breaking[:20]:  # cap at 20 to avoid DB spam
-        try:
-            await db.insert("news_events", {
-                "title":        article.get("title", "")[:500],
-                "source":       article.get("source", ""),
-                "url":          article.get("url", "")[:1000],
-                "published_at": article["published_at"].isoformat()
-                                if hasattr(article.get("published_at"), "isoformat")
-                                else str(article.get("published_at", "")),
-                "weight":       article.get("weight", 0.7),
-                "fetched_at":   datetime.now(timezone.utc).isoformat(),
-            })
-        except Exception:
-            pass  # DB errors in news logging are non-fatal
+        url = article.get("url", "")[:1000]
+        if not url:
+            continue
+        await db.upsert("news_events", {
+            "title":        article.get("title", "")[:500],
+            "source":       article.get("source", ""),
+            "url":          url,
+            "published_at": article["published_at"].isoformat()
+                            if hasattr(article.get("published_at"), "isoformat")
+                            else str(article.get("published_at", "")),
+            "weight":       article.get("weight", 0.7),
+            "fetched_at":   datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="url")
 
     if breaking:
         high_impact = [a for a in breaking if any(
@@ -192,6 +208,19 @@ async def run_live_push():
             return_exceptions=True,
         )
         if not isinstance(account, Exception):
+            # Merge circuit-breaker computed drawdowns into the account snapshot.
+            # OANDA always returns weekly/monthly drawdown as 0.0 — we derive the
+            # real values from equity history via circuit_breaker.load_drawdown_from_db().
+            cb = agent.circuit_breaker.status()
+            account["daily_drawdown_pct"]   = cb["daily_drawdown_pct"]
+            account["weekly_drawdown_pct"]  = cb["weekly_drawdown_pct"]
+            account["monthly_drawdown_pct"] = cb.get("monthly_drawdown_pct", 0.0)
+            account["circuit_breaker"]      = {
+                "size_multiplier":  cb["size_multiplier"],
+                "trading_allowed":  cb["trading_allowed"],
+                "weekly_limit_hit": cb["weekly_limit_hit"],
+                "hard_stop":        cb["hard_stop"],
+            }
             await ws_manager.broadcast({"type": "account_update",   "data": account})
         if not isinstance(positions, Exception):
             await ws_manager.broadcast({"type": "positions_update", "data": {"positions": positions}})
@@ -536,10 +565,83 @@ async def get_account_snapshots(limit: int = 168):
 
 @app.post("/settings")
 async def save_settings(settings: dict):
-    """Persist risk settings to DB."""
-    await db.insert("settings", {"key": "risk_params", "value": settings,
-                                  "updated_at": datetime.now(timezone.utc).isoformat()})
+    """Persist risk settings to DB and apply to live circuit breaker."""
+    await db.upsert("settings", {"key": "risk_params", "value": settings,
+                                  "updated_at": datetime.now(timezone.utc).isoformat()},
+                    on_conflict="key")
+    # Apply risk limits to the live circuit breaker immediately (no restart required)
+    cb = agent.circuit_breaker
+    if "max_daily_dd_pct" in settings:
+        cb.max_daily_dd = float(settings["max_daily_dd_pct"])
+    if "max_weekly_dd_pct" in settings:
+        cb.max_weekly_dd = float(settings["max_weekly_dd_pct"])
+    if "max_monthly_dd_pct" in settings:
+        cb.max_monthly_dd = float(settings["max_monthly_dd_pct"])
     return {"status": "saved"}
+
+
+@app.get("/admin/trading-mode")
+async def get_trading_mode():
+    """Return current trading mode (demo/live) and account info."""
+    row = await db.select("settings", {"key": "trading_mode"})
+    current = "live" if agent.zmq.is_live else "demo"
+    stored  = row[0].get("value", {}).get("mode", "demo") if row else "demo"
+    return {
+        "mode":          current,
+        "is_live":       agent.zmq.is_live,
+        "account_id":    agent.zmq.account_id,
+        "base_url":      agent.zmq.base_url,
+        "last_switched": row[0].get("updated_at") if row else None,
+    }
+
+
+class TradingModeRequest(BaseModel):
+    mode: str   # "demo" or "live"
+
+
+@app.post("/admin/trading-mode")
+async def set_trading_mode(req: TradingModeRequest):
+    """
+    Hot-switch between demo and live trading.
+    DEMO → uses api-fxpractice.oanda.com + OANDA_API_KEY_DEMO
+    LIVE → uses api-fxtrade.oanda.com    + OANDA_API_KEY_LIVE
+    Takes effect immediately — no restart required.
+    """
+    if req.mode not in ("demo", "live"):
+        raise HTTPException(400, "mode must be 'demo' or 'live'")
+
+    go_live = req.mode == "live"
+
+    # Hard safety: refuse to go live if OANDA_API_KEY_LIVE is not set
+    if go_live:
+        import os as _os
+        live_key = _os.environ.get("OANDA_API_KEY_LIVE") or _os.environ.get("OANDA_API_KEY", "")
+        live_acct = _os.environ.get("OANDA_ACCOUNT_ID_LIVE") or _os.environ.get("OANDA_ACCOUNT_ID", "")
+        if not live_key or not live_acct:
+            raise HTTPException(400, "OANDA_API_KEY_LIVE and OANDA_ACCOUNT_ID_LIVE must be set before going live")
+
+    result = agent.zmq.switch_mode(go_live)
+
+    # Persist mode to DB so it survives agent restarts (reload on next startup)
+    await db.upsert("settings",
+        {"key": "trading_mode", "value": {"mode": req.mode},
+         "updated_at": datetime.now(timezone.utc).isoformat()},
+        on_conflict="key")
+
+    logger.warning(f"[ADMIN] Trading mode changed: {result}")
+    return {"status": "switched", **result}
+
+
+@app.get("/risk-sentiment")
+async def get_risk_sentiment():
+    """Real-time risk appetite from TSLA, SPX, and JP Morgan equity price action."""
+    from core.ingestion.risk_sentiment import RiskSentimentReader
+    reader   = RiskSentimentReader()
+    appetite, jpm = await asyncio.gather(
+        reader.get_risk_appetite(),
+        reader.get_jpm_outlook(),
+    )
+    return {**appetite, "jpm_outlook": jpm}
 
 
 @app.get("/research/feed")
@@ -638,7 +740,8 @@ async def get_settings():
     if rows:
         return rows[0].get("value", {})
     return {
-        "max_risk_pct": 1.0, "max_daily_dd_pct": 3.0,
+        "max_risk_pct": 1.0, "max_daily_dd_pct": 2.0,
+        "max_weekly_dd_pct": 5.0, "max_monthly_dd_pct": 10.0,
         "signal_threshold": 0.60, "max_open_trades": 8,
     }
 
@@ -658,6 +761,16 @@ async def websocket_endpoint(websocket: WebSocket):
             return_exceptions=True,
         )
         if not isinstance(account_data, Exception):
+            cb = agent.circuit_breaker.status()
+            account_data["daily_drawdown_pct"]   = cb["daily_drawdown_pct"]
+            account_data["weekly_drawdown_pct"]  = cb["weekly_drawdown_pct"]
+            account_data["monthly_drawdown_pct"] = cb.get("monthly_drawdown_pct", 0.0)
+            account_data["circuit_breaker"]      = {
+                "size_multiplier":  cb["size_multiplier"],
+                "trading_allowed":  cb["trading_allowed"],
+                "weekly_limit_hit": cb["weekly_limit_hit"],
+                "hard_stop":        cb["hard_stop"],
+            }
             await websocket.send_text(json.dumps({
                 "type": "account_update", "data": account_data
             }, default=str))

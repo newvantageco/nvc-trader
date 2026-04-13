@@ -44,9 +44,16 @@ class SentimentPipeline:
     def __init__(self) -> None:
         self._pipe = None  # lazy load
 
-    def _ensure_loaded(self):
-        if self._pipe is None:
+    def _ensure_loaded(self) -> bool:
+        """Returns True if model loaded successfully, False on failure."""
+        if self._pipe is not None:
+            return True
+        try:
             self._pipe = _load_finbert()
+            return True
+        except Exception as exc:
+            logger.warning(f"[FinBERT] Model load failed — using neutral fallback: {exc}")
+            return False
 
     def score_articles(self, articles: list[dict]) -> list[dict]:
         """
@@ -56,7 +63,11 @@ class SentimentPipeline:
         if not articles:
             return []
 
-        self._ensure_loaded()
+        if not self._ensure_loaded():
+            return [
+                {**a, "sentiment_score": 0.0, "sentiment_label": "neutral", "sentiment_confidence": 0.0}
+                for a in articles
+            ]
 
         texts = [
             f"{a['title']}. {a.get('description', '')}"[:512]
@@ -67,7 +78,11 @@ class SentimentPipeline:
             results = self._pipe(texts)
         except Exception as exc:
             logger.warning(f"[FinBERT] Inference failed: {exc}")
-            return articles
+            # Return articles with neutral scores so aggregate() doesn't crash
+            return [
+                {**a, "sentiment_score": 0.0, "sentiment_label": "neutral", "sentiment_confidence": 0.0}
+                for a in articles
+            ]
 
         scored = []
         for article, preds in zip(articles, results):

@@ -45,6 +45,8 @@ from datetime import datetime, timezone
 from typing import NamedTuple
 from loguru import logger
 
+from core.signals.trader_strategies import LegendaryTraderAnalyser
+
 
 class EdgeCheckResult(NamedTuple):
     passes:         bool
@@ -53,8 +55,9 @@ class EdgeCheckResult(NamedTuple):
     conditions:     dict         # each condition: True/False
     recommended_size: float      # fraction of max size (0.0–1.0)
     recommended_rr:   float      # minimum risk:reward ratio
-    special_setup:    str | None  # INSTITUTIONAL_DIVERGENCE / BREAKOUT / NEWS_AFTERMATH / None
+    special_setup:    str | None  # INSTITUTIONAL_DIVERGENCE / BREAKOUT / NEWS_AFTERMATH / TURTLE_BREAKOUT / LIVERMORE_PIVOTAL / None
     notes:          list[str]
+    trader_signals: dict         # lightweight trader strategy signals (Seykota, Livermore, Turtle)
 
 
 # Normal spread baselines in pips
@@ -70,6 +73,9 @@ NORMAL_SPREAD_PIPS: dict[str, float] = {
 class EdgeFilter:
     """Evaluates whether a trading setup has sufficient statistical edge."""
 
+    def __init__(self) -> None:
+        self._trader_analyser = LegendaryTraderAnalyser()
+
     def evaluate(
         self,
         instrument:   str,
@@ -82,12 +88,15 @@ class EdgeFilter:
         account:      dict,               # equity, daily_drawdown_pct, open_positions
         spread_pips:  float | None = None,
         news_event_minutes_ago: int | None = None,
+        candles_h4:   list[dict] | None = None,   # for Livermore + Turtle
+        candles_d1:   list[dict] | None = None,   # for Seykota + Turtle
     ) -> EdgeCheckResult:
         """Run all 8 conditions and return the result."""
 
         conditions: dict[str, bool] = {}
         notes: list[str] = []
         special_setup: str | None = None
+        trader_signals: dict = {}
 
         # ── Condition 1: Regime ───────────────────────────────────────────────
         r = regime.get("regime", "RANGING")
@@ -120,14 +129,21 @@ class EdgeFilter:
         # ── Condition 3: Sentiment ────────────────────────────────────────────
         sentiment_score = sentiment.get("normalised_score", 0.5)
         dominant_bias   = sentiment.get("dominant_bias", "neutral")
-        sent_ok = (
-            (direction == "BUY"  and sentiment_score > 0.52) or
-            (direction == "SELL" and sentiment_score < 0.48)
+        article_count   = sentiment.get("article_count", 0)
+
+        # Neutral sentiment (0.45–0.55) or no news coverage → pass, not block.
+        # No news ≠ bad news. Sentiment should block only when it ACTIVELY opposes direction.
+        is_neutral  = 0.45 <= sentiment_score <= 0.55
+        is_opposing = (
+            (direction == "BUY"  and sentiment_score < 0.40) or
+            (direction == "SELL" and sentiment_score > 0.60)
         )
+        sent_ok = not is_opposing
         conditions["sentiment"] = sent_ok
         notes.append(
-            f"Sentiment: {dominant_bias} ({sentiment_score:.2f}) "
-            f"{'✓' if sent_ok else '✗ (not aligned)'}"
+            f"Sentiment: {dominant_bias} ({sentiment_score:.2f}, {article_count} articles) "
+            + ("✓ (neutral — not blocking)" if is_neutral else
+               "✓ (aligned)" if sent_ok else "✗ (actively opposes direction)")
         )
 
         # ── Condition 4: Institutional (COT + Order Book) ─────────────────────
@@ -196,8 +212,9 @@ class EdgeFilter:
         hour = datetime.now(timezone.utc).hour
         day  = datetime.now(timezone.utc).weekday()   # 0=Mon, 6=Sun
 
-        # No trading: Sunday after 21:00 or before Monday 00:00
-        is_dead_zone = (day == 6 and hour >= 21) or (day == 6 and hour < 21 and hour >= 0)
+        # Dead zone: all of Saturday (markets closed) + Sunday before 21:00 UTC.
+        # NZ/Sydney opens Sunday ~21:00 UTC — trading resumes from that point.
+        is_dead_zone = (day == 5) or (day == 6 and hour < 21)
 
         # Active sessions for each instrument type
         is_forex     = instrument not in ("XAUUSD", "XAGUSD", "USOIL", "UKOIL", "NATGAS")
@@ -248,6 +265,44 @@ class EdgeFilter:
             special_setup = "NEWS_AFTERMATH"
             notes.append("⚡ NEWS AFTERMATH: 5-30 min post-event — watch for 50-61.8% retracement entry")
 
+        # ── Legendary Trader Signals (Seykota, Livermore, Turtle) ────────────
+        if candles_h4 or candles_d1:
+            try:
+                h4 = candles_h4 or []
+                d1 = candles_d1 or []
+
+                # Seykota 150-day trend filter
+                seykota = self._trader_analyser.seykota.check_trend_alignment(d1, direction)
+                trader_signals["seykota"] = seykota
+                if not seykota["aligned"] and seykota["trend"] != "NEUTRAL":
+                    notes.append(f"⚠️  {seykota['note']}")
+                else:
+                    notes.append(seykota["note"])
+
+                # Livermore pivotal point
+                livermore = self._trader_analyser.livermore.detect_pivotal_point(h4 or d1, direction)
+                trader_signals["livermore"] = livermore
+                if livermore["is_pivotal"] and not special_setup:
+                    special_setup = "LIVERMORE_PIVOTAL"
+                    notes.append(f"⚡ LIVERMORE PIVOTAL: {livermore['note']}")
+                else:
+                    notes.append(livermore["note"])
+
+                # Turtle breakout
+                turtle = self._trader_analyser.turtles.detect_breakout(d1 or h4, direction)
+                trader_signals["turtle"] = turtle
+                if turtle["system2_signal"] and not special_setup:
+                    special_setup = "TURTLE_BREAKOUT_S2"
+                    notes.append(f"⚡ TURTLE S2: 55-day channel breakout — {turtle['note']}")
+                elif turtle["system1_signal"] and not special_setup:
+                    special_setup = "TURTLE_BREAKOUT_S1"
+                    notes.append(f"⚡ TURTLE S1: 20-day channel breakout — {turtle['note']}")
+                else:
+                    notes.append(turtle["note"])
+
+            except Exception as _exc:
+                logger.debug(f"[EdgeFilter] Trader strategy check skipped: {_exc}")
+
         # ── Grade ─────────────────────────────────────────────────────────────
         score_count = sum(conditions.values())
 
@@ -258,6 +313,12 @@ class EdgeFilter:
         elif special_setup == "BREAKOUT" and ta_ok:
             effective_score = score_count + 1
             notes.append("Breakout bonus: +1 to score")
+        elif special_setup == "TURTLE_BREAKOUT_S2" and ta_ok:
+            effective_score = score_count + 1
+            notes.append("Turtle S2 breakout: +1 to score (55-day channel confirmed)")
+        elif special_setup == "LIVERMORE_PIVOTAL" and ta_ok:
+            effective_score = score_count + 1
+            notes.append("Livermore pivotal break: +1 to score (structural level broken)")
         else:
             effective_score = score_count
 
@@ -297,4 +358,5 @@ class EdgeFilter:
             recommended_rr=rec_rr,
             special_setup=special_setup,
             notes=notes,
+            trader_signals=trader_signals,
         )

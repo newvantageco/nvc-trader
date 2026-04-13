@@ -65,6 +65,12 @@ RESEARCH_FEEDS: list[dict] = [
         "authority": 0.88,
     },
     {
+        "name":     "Bank of Japan",
+        "url":      "https://www.boj.or.jp/en/rss/release.xml",
+        "currency": ["JPY"],
+        "authority": 0.95,
+    },
+    {
         "name":     "FXStreet Analysis",
         "url":      "https://www.fxstreet.com/rss/news",
         "currency": ["USD", "EUR", "GBP", "JPY", "AUD"],
@@ -81,6 +87,25 @@ RESEARCH_FEEDS: list[dict] = [
         "url":      "https://www.brookings.edu/topic/economic-studies/feed/",
         "currency": ["USD"],
         "authority": 0.80,
+    },
+    # ── Tier-1 Wall Street (JPMorgan + MS) ───────────────────────────────────
+    {
+        "name":     "JPMorgan Market Insights",
+        "url":      "https://privatebank.jpmorgan.com/content/dam/jpm-wm-aem/global/pb/en/insights/eye-on-the-market/rss.xml",
+        "currency": ["USD", "EUR", "GBP", "JPY"],
+        "authority": 0.97,   # largest FX dealer, ~10% of global FX volume
+    },
+    {
+        "name":     "Morgan Stanley Research",
+        "url":      "https://www.morganstanley.com/rss/thoughts-on-the-market-podcast.xml",
+        "currency": ["USD", "EUR", "JPY"],
+        "authority": 0.92,
+    },
+    {
+        "name":     "Goldman Sachs Briefings",
+        "url":      "https://www.goldmansachs.com/insights/rss.xml",
+        "currency": ["USD", "EUR", "GBP"],
+        "authority": 0.93,
     },
 ]
 

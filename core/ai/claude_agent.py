@@ -42,6 +42,8 @@ from core.ingestion.cot_fetcher import COTFetcher
 from core.ingestion.order_book import OrderBookReader
 from core.ingestion.fred_client import FREDClient
 from core.ingestion.research_fetcher import ResearchFetcher
+from core.ingestion.risk_sentiment import RiskSentimentReader
+from core.signals.trader_strategies import LegendaryTraderAnalyser
 from core.execution.smart_executor import SmartExecutor
 from core.planning.portfolio_optimizer import PortfolioOptimizer
 from core.analysis.regime_detector import RegimeDetector
@@ -76,6 +78,8 @@ class VantageAgent:
         self.order_book      = OrderBookReader()
         self.fred            = FREDClient()
         self.research        = ResearchFetcher()
+        self.risk_sentinel   = RiskSentimentReader()
+        self.trader_analyser = LegendaryTraderAnalyser()
         self.smart_executor  = SmartExecutor()
         self.optimizer       = PortfolioOptimizer()
         self.regime          = RegimeDetector()
@@ -198,6 +202,10 @@ class VantageAgent:
                     return await self._tool_macro_environment(**inputs)
                 case "get_institutional_research":
                     return await self._tool_institutional_research(**inputs)
+                case "get_risk_sentiment":
+                    return await self._tool_risk_sentiment()
+                case "get_trader_analysis":
+                    return await self._tool_trader_analysis(**inputs)
                 case "get_portfolio_analysis":
                     return await self._tool_portfolio_analysis(**inputs)
                 case "get_performance_stats":
@@ -271,8 +279,9 @@ class VantageAgent:
         if score < 0.60:
             return {"status": "REJECTED", "reason": f"Score {score:.2f} below minimum 0.60"}
 
-        if self.circuit_breaker.is_daily_limit_hit():
-            return {"status": "REJECTED", "reason": "Daily drawdown limit reached"}
+        cb_mult = self.circuit_breaker.size_multiplier()
+        if cb_mult == 0.0:
+            return {"status": "REJECTED", "reason": "Circuit breaker active — daily drawdown or weekly halt. No new trades."}
 
         if len(self._open_positions) >= 8:
             return {"status": "REJECTED", "reason": "Maximum open trades (8) reached"}
@@ -286,6 +295,15 @@ class VantageAgent:
         )
         if not validated_lot["valid"]:
             return {"status": "REJECTED", "reason": validated_lot["reason"]}
+
+        # Final live spread check — catches news spikes that occur between
+        # edge filter evaluation and actual order submission
+        spread_ok, spread_info = await self.smart_executor._check_spread(instrument, max_mult=2.5)
+        if not spread_ok:
+            return {
+                "status": "REJECTED",
+                "reason": f"Spread spike at execution time: {spread_info}. Wait for spread to normalise.",
+            }
 
         signal = {
             "signal_id": f"sig_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}",
@@ -380,6 +398,27 @@ class VantageAgent:
     ) -> dict:
         return await self.fred.get_macro_environment(instruments or [])
 
+    async def _tool_risk_sentiment(self) -> dict:
+        """
+        Fetches TSLA/SPX/JPM 5-day equity returns as a real-time risk appetite proxy.
+        Also includes JP Morgan's published FX price targets for 2026.
+        Use this in Step 3 (Positioning) to confirm risk-on/off environment.
+        """
+        appetite   = await self.risk_sentinel.get_risk_appetite()
+        jpm        = await self.risk_sentinel.get_jpm_outlook()
+        return {
+            "risk_appetite":    appetite["risk_appetite"],
+            "composite_score":  appetite["score"],
+            "tsla_5d_return":   appetite["tsla_5d_return"],
+            "spx_5d_return":    appetite["spx_5d_return"],
+            "jpm_5d_return":    appetite["jpm_5d_return"],
+            "signal_for_pairs": appetite["signal_for_pair"],
+            "jpm_credit_signal": jpm["credit_signal"],
+            "jpm_fx_targets":   jpm["fx_targets"],
+            "note":             appetite["note"],
+            "source":           appetite["source"],
+        }
+
     async def _tool_institutional_research(
         self,
         currencies: list[str] | None = None,
@@ -463,6 +502,23 @@ class VantageAgent:
         spread_pips: float | None = None,
         news_event_minutes_ago: int | None = None,
     ) -> dict:
+        # Use circuit_breaker's DB-computed daily DD — OANDA always returns 0.0
+        cb_dd = self.circuit_breaker.status()["daily_drawdown_pct"]
+
+        # Pull cached H4 + D1 candles from TA engine (best-effort, no extra I/O)
+        candles_h4: list[dict] | None = None
+        candles_d1: list[dict] | None = None
+        try:
+            import pandas as pd
+            cached_h4 = getattr(self.ta_engine, "_last_ohlcv_cache", {}).get(f"{instrument}_H4")
+            if cached_h4 is not None and isinstance(cached_h4, pd.DataFrame):
+                candles_h4 = cached_h4[["open", "high", "low", "close"]].to_dict("records")
+            cached_d1 = getattr(self.ta_engine, "_last_ohlcv_cache", {}).get(f"{instrument}_D1")
+            if cached_d1 is not None and isinstance(cached_d1, pd.DataFrame):
+                candles_d1 = cached_d1[["open", "high", "low", "close"]].to_dict("records")
+        except Exception:
+            pass
+
         result = self.edge_filter.evaluate(
             instrument=instrument,
             direction=direction,
@@ -472,11 +528,13 @@ class VantageAgent:
             macro=macro,
             regime=regime,
             account={
-                "daily_drawdown_pct": self._account_metrics.get("daily_drawdown_pct", 0),
+                "daily_drawdown_pct": cb_dd,
                 "open_positions":     len(self._open_positions),
             },
             spread_pips=spread_pips,
             news_event_minutes_ago=news_event_minutes_ago,
+            candles_h4=candles_h4,
+            candles_d1=candles_d1,
         )
         return {
             "passes":            result.passes,
@@ -486,6 +544,7 @@ class VantageAgent:
             "recommended_size":  result.recommended_size,
             "recommended_rr":    result.recommended_rr,
             "special_setup":     result.special_setup,
+            "trader_signals":    result.trader_signals,
             "notes":             result.notes,
             "verdict": (
                 f"{'✅ TRADE APPROVED' if result.passes else '❌ TRADE BLOCKED'} — "
@@ -495,17 +554,81 @@ class VantageAgent:
             ),
         }
 
+    async def _tool_trader_analysis(
+        self,
+        instrument:       str,
+        direction:        str,
+        entry:            float,
+        stop_loss:        float,
+        take_profit:      float,
+        atr:              float,
+        edge_score:       int,
+        macro_score:      float = 0.5,
+        active_patterns:  list[str] | None = None,
+    ) -> dict:
+        """
+        Runs all 7 legendary trader strategies against a live trade setup.
+        Fetches H4 + D1 candles automatically for Livermore, Seykota, and Turtle checks.
+        Returns verdict, green_lights/7, final_multiplier (for position sizing), and per-strategy detail.
+        """
+        # Fetch candle data for technical strategy checks
+        candles_h4: list[dict] = []
+        candles_d1: list[dict] = []
+        try:
+            import pandas as pd
+            df_h4 = await self.ta_engine._get_ohlcv(instrument, "H4")
+            if isinstance(df_h4, pd.DataFrame) and not df_h4.empty:
+                candles_h4 = df_h4[["open", "high", "low", "close"]].to_dict("records")
+        except Exception as exc:
+            logger.debug(f"[TraderAnalysis] H4 fetch failed for {instrument}: {exc}")
+
+        try:
+            import pandas as pd
+            df_d1 = await self.ta_engine._get_ohlcv(instrument, "D1")
+            if isinstance(df_d1, pd.DataFrame) and not df_d1.empty:
+                candles_d1 = df_d1[["open", "high", "low", "close"]].to_dict("records")
+        except Exception as exc:
+            logger.debug(f"[TraderAnalysis] D1 fetch failed for {instrument}: {exc}")
+
+        macro_data = {}
+        try:
+            macro_data = await self.fred.get_macro_environment([instrument])
+        except Exception as exc:
+            logger.debug(f"[TraderAnalysis] Macro fetch failed: {exc}")
+
+        result = self.trader_analyser.analyse(
+            instrument=instrument,
+            direction=direction,
+            entry=entry,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            atr=atr,
+            candles_h4=candles_h4,
+            candles_d1=candles_d1,
+            edge_score=edge_score,
+            macro_score=macro_score,
+            macro_data=macro_data,
+            active_patterns=active_patterns,
+        )
+
+        logger.info(
+            f"[TraderAnalysis] {instrument} {direction}: {result['verdict']} "
+            f"| {result['green_lights']} | multiplier={result['final_multiplier']}"
+        )
+        return result
+
     async def _tool_performance_stats(self, lookback_days: int = 30) -> dict:
         return await self.perf_tracker.get_stats(lookback_days=lookback_days)
 
     def _tool_calculate_position_size(
         self,
-        instrument:      str,
-        entry_price:     float,
-        stop_loss:       float,
-        account_equity:  float,
-        regime:          str = "RANGING",
-        factors_aligned: int = 3,
+        instrument:               str,
+        entry_price:              float,
+        stop_loss:                float,
+        account_equity:           float,
+        regime:                   str = "RANGING",
+        factors_aligned:          int = 3,
+        druckenmiller_multiplier: float | None = None,
     ) -> dict:
         # Always apply circuit breaker multiplier — agent cannot override this
         circuit_mult = self.circuit_breaker.size_multiplier()
@@ -527,11 +650,13 @@ class VantageAgent:
             regime=regime,
             factors_aligned=factors_aligned,
             circuit_mult=circuit_mult,
+            druckenmiller_multiplier=druckenmiller_multiplier,
         )
 
-        cb_note = f" [WEEKLY LIMIT: sizes halved]" if circuit_mult < 1.0 else ""
+        cb_note = " [WEEKLY LIMIT: sizes halved]" if circuit_mult < 1.0 else ""
+        druck_note = f" [Druckenmiller {druckenmiller_multiplier}× applied]" if druckenmiller_multiplier else ""
         result["instruction"] = (
-            f"Use lot_size={result['lot_size']} in execute_trade.{cb_note} "
+            f"Use lot_size={result['lot_size']} in execute_trade.{cb_note}{druck_note} "
             f"Risk: ${result['risk_usd']:.2f} ({result['risk_pct']:.2f}% of equity). "
             f"Regime={result['regime_mult']}× | Conviction={result['conviction_mult']}× | Circuit={circuit_mult}×"
         )
@@ -562,6 +687,31 @@ class VantageAgent:
         self.circuit_breaker.update(self._account_metrics)
         # Load real drawdown from DB snapshots — OANDA's reported value is always 0
         await self.circuit_breaker.load_drawdown_from_db(self.db)
+        # Write a snapshot every cycle (15 min) so circuit breaker has fine-grained
+        # equity history. Without this, intra-hour drops up to 2% go undetected.
+        await self._write_cycle_snapshot()
+
+    async def _write_cycle_snapshot(self) -> None:
+        """
+        Write a lightweight equity snapshot every agent cycle (every 15 min).
+        The hourly cron in main.py writes full snapshots; this fills the gaps so
+        circuit_breaker.load_drawdown_from_db() has ≤15 min granularity.
+        """
+        try:
+            equity = self._account_metrics.get("equity", 0)
+            if equity <= 0:
+                return
+            await self.db.insert("account_snapshots", {
+                "timestamp":     datetime.now(timezone.utc).isoformat(),
+                "balance":       self._account_metrics.get("balance", 0),
+                "equity":        equity,
+                "margin_used":   self._account_metrics.get("margin", 0),
+                "free_margin":   self._account_metrics.get("free_margin", 0),
+                "unrealised_pl": self._account_metrics.get("unrealised_pl", 0),
+                "system_status": self._account_metrics.get("system_status", "agent_cycle"),
+            })
+        except Exception as exc:
+            logger.debug(f"[SNAPSHOT] Cycle snapshot failed (non-critical): {exc}")
 
     def _build_context_message(self, trigger: str) -> str:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")

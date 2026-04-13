@@ -25,7 +25,11 @@ from typing import Optional
 import aiohttp
 from loguru import logger
 
-OANDA_BASE = "https://api-fxpractice.oanda.com"   # swap to api-fxtrade for live
+def _oanda_base() -> str:
+    import os
+    return ("https://api-fxtrade.oanda.com"
+            if os.getenv("OANDA_LIVE", "false").lower() == "true"
+            else "https://api-fxpractice.oanda.com")
 
 # Our symbols → OANDA instrument format
 SYMBOL_MAP: dict[str, str] = {
@@ -88,7 +92,7 @@ class OrderBookReader:
     # ── Fetchers ──────────────────────────────────────────────────────────────
 
     async def _fetch_position_book(self, oanda_sym: str) -> dict:
-        url = f"{OANDA_BASE}/v3/instruments/{oanda_sym}/positionBook"
+        url = f"{_oanda_base()}/v3/instruments/{oanda_sym}/positionBook"
         async with aiohttp.ClientSession() as s:
             async with s.get(url, headers=self._headers,
                              timeout=aiohttp.ClientTimeout(total=10)) as r:
@@ -96,7 +100,7 @@ class OrderBookReader:
                 return await r.json()
 
     async def _fetch_order_book(self, oanda_sym: str) -> dict:
-        url = f"{OANDA_BASE}/v3/instruments/{oanda_sym}/orderBook"
+        url = f"{_oanda_base()}/v3/instruments/{oanda_sym}/orderBook"
         async with aiohttp.ClientSession() as s:
             async with s.get(url, headers=self._headers,
                              timeout=aiohttp.ClientTimeout(total=10)) as r:

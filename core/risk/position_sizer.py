@@ -71,13 +71,14 @@ class PositionSizer:
 
     def calculate_lot(
         self,
-        instrument:      str,
-        entry_price:     float,
-        stop_loss:       float,
-        account_equity:  float,
-        regime:          str = "RANGING",
-        factors_aligned: int = 3,
-        circuit_mult:    float = 1.0,   # from CircuitBreaker.size_multiplier()
+        instrument:              str,
+        entry_price:             float,
+        stop_loss:               float,
+        account_equity:          float,
+        regime:                  str = "RANGING",
+        factors_aligned:         int = 3,
+        circuit_mult:            float = 1.0,     # from CircuitBreaker.size_multiplier()
+        druckenmiller_multiplier: float | None = None,  # override from LegendaryTraderAnalyser
     ) -> dict:
         """
         Calculate the correct lot size using Van Tharp formula + multipliers.
@@ -90,8 +91,15 @@ class PositionSizer:
         if sl_pips <= 0:
             return {"lot_size": 0.0, "error": "Stop loss distance is zero", "risk_usd": 0}
 
-        regime_mult     = REGIME_MULTIPLIERS.get(regime, 0.7)
-        conviction_mult = CONVICTION_MULTIPLIERS.get(min(factors_aligned, 5), 0.6)
+        regime_mult = REGIME_MULTIPLIERS.get(regime, 0.7)
+
+        # Druckenmiller multiplier (from LegendaryTraderAnalyser) overrides
+        # the standard factors-aligned lookup when provided. This allows 1.5× on
+        # A++ setups (8/8 edge + strong macro + trend aligned) instead of 1.3×.
+        if druckenmiller_multiplier is not None:
+            conviction_mult = druckenmiller_multiplier
+        else:
+            conviction_mult = CONVICTION_MULTIPLIERS.get(min(factors_aligned, 5), 0.6)
 
         # Effective risk % after all multipliers
         # circuit_mult: 0.0 = no trade, 0.5 = R5 weekly limit, 1.0 = normal
@@ -106,9 +114,10 @@ class PositionSizer:
         actual_risk_usd = lots * sl_pips * pip_value
         actual_risk_pct = actual_risk_usd / account_equity * 100
 
+        conviction_source = "druck" if druckenmiller_multiplier is not None else f"{factors_aligned}/5"
         logger.info(
             f"[SIZER] {instrument}: regime={regime}({regime_mult}×) "
-            f"conviction={factors_aligned}/5({conviction_mult}×) "
+            f"conviction={conviction_source}({conviction_mult}×) "
             f"circuit={circuit_mult}× → "
             f"risk={effective_risk_pct:.2f}% → {lots} lots "
             f"(${actual_risk_usd:.2f} at risk)"
