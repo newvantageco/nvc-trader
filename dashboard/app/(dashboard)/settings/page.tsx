@@ -79,8 +79,8 @@ export default function SettingsPage() {
       .catch(() => {})
 
     fetch(`${API}/account`)
-      .then(r => r.json())
-      .then(d => setStatus(d))
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setStatus(d) })
       .catch(() => {})
   }, [])
 

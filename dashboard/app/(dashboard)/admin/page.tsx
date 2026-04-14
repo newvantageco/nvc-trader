@@ -12,6 +12,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'https://nvc-trader.fly.dev'
 interface AdminData {
   performance: {
     account_balance: number
+    currency: string
     apy_pct: number
     avg_daily_usd: number
     avg_daily_pct: number
@@ -293,7 +294,10 @@ export default function AdminPage() {
 
   useEffect(() => {
     fetch(`${API_URL}/admin/overview`)
-      .then(r => r.json())
+      .then(r => {
+        if (!r.ok) throw new Error(`API error ${r.status}`)
+        return r.json()
+      })
       .then(d => { setData(d); setLoading(false) })
       .catch(e => { setError(e.message); setLoading(false) })
   }, [])
@@ -318,6 +322,9 @@ export default function AdminPage() {
   }
 
   const { performance: perf, growth, costs, profitability: profit } = data
+  // Use correct currency symbol from account data (GBP = £, USD = $, etc.)
+  const currencySymbol = perf.currency === 'GBP' ? '£' : perf.currency === 'EUR' ? '€' : '$'
+  const fmt = (n: number) => `${n < 0 ? '-' : ''}${currencySymbol}${Math.abs(n).toFixed(2)}`
   const marginColor = profit.profit_margin_pct >= 60 ? 'var(--bull)' :
                       profit.profit_margin_pct >= 40 ? 'var(--accent)' : 'var(--bear)'
 
@@ -349,10 +356,10 @@ export default function AdminPage() {
       <TradingModePanel />
 
       {/* ── KPI row ── */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard
           label="Account Balance"
-          value={`$${perf.account_balance.toFixed(2)}`}
+          value={fmt(perf.account_balance)}
           sub={`${perf.trading_days} trading days tracked`}
           icon={DollarSign}
           accent
@@ -365,8 +372,8 @@ export default function AdminPage() {
         />
         <StatCard
           label="Avg Daily P&L"
-          value={perf.avg_daily_usd > 0 ? `$${perf.avg_daily_usd.toFixed(2)}` : '—'}
-          sub={`vs $${costs.daily_total.toFixed(2)}/day cost`}
+          value={perf.avg_daily_usd > 0 ? fmt(perf.avg_daily_usd) : '—'}
+          sub={`vs ${fmt(costs.daily_total)}/day cost`}
           icon={BarChart2}
           accent={perf.avg_daily_usd > costs.daily_total}
           warn={perf.avg_daily_usd > 0 && perf.avg_daily_usd <= costs.daily_total}
@@ -381,7 +388,7 @@ export default function AdminPage() {
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
 
         {/* ── Growth Stage ── */}
         <div
@@ -461,7 +468,7 @@ export default function AdminPage() {
               ['Min RR',         `${growth.params.min_rr}:1`],
               ['Max positions',  `${growth.params.max_open_trades}`],
               ['Position size',  `${growth.params.position_units.toLocaleString()} units`],
-              ['Pip value',      `~$${growth.params.pip_value_approx}/pip`],
+              ['Pip value',      `~${currencySymbol}${growth.params.pip_value_approx}/pip`],
             ].map(([k, v]) => (
               <div key={k} className="flex items-center justify-between">
                 <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{k}</span>
@@ -543,10 +550,10 @@ export default function AdminPage() {
             style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border)' }}
           >
             {[
-              ['Monthly total',    `$${(costs.monthly.total ?? costs.daily_total * 30).toFixed(2)}`],
-              ['Daily cost',       `$${costs.daily_total.toFixed(2)}`],
-              ['Break-even/day',   `$${profit.breakeven_daily_usd.toFixed(2)}`],
-              ['65% margin needs', `$${(profit.breakeven_daily_usd / 0.35).toFixed(2)}/day`],
+              ['Monthly total',    fmt(costs.monthly.total ?? costs.daily_total * 30)],
+              ['Daily cost',       fmt(costs.daily_total)],
+              ['Break-even/day',   fmt(profit.breakeven_daily_usd)],
+              ['65% margin needs', `${fmt(profit.breakeven_daily_usd / 0.35)}/day`],
             ].map(([k, v]) => (
               <div key={k} className="flex items-center justify-between">
                 <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{k}</span>
@@ -620,9 +627,9 @@ export default function AdminPage() {
               Monthly projection
             </div>
             {[
-              ['Gross revenue',   `$${profit.monthly_gross.toFixed(2)}`, 'var(--text-primary)'],
-              ['Platform costs',  `−$${profit.monthly_costs.toFixed(2)}`, 'var(--bear)'],
-              ['Net profit',      `$${profit.monthly_net.toFixed(2)}`,
+              ['Gross revenue',   fmt(profit.monthly_gross), 'var(--text-primary)'],
+              ['Platform costs',  `−${fmt(profit.monthly_costs)}`, 'var(--bear)'],
+              ['Net profit',      fmt(profit.monthly_net),
                profit.monthly_net >= 0 ? 'var(--bull)' : 'var(--bear)'],
             ].map(([k, v, c]) => (
               <div key={k} className="flex items-center justify-between border-t pt-1.5" style={{ borderColor: 'var(--border)' }}>

@@ -499,6 +499,7 @@ async def admin_overview():
         # ── Performance ─────────────────────────────────────────────────────
         "performance": {
             "account_balance":  balance,
+            "currency":         account.get("currency", "USD"),
             "apy_pct":          apy.get("apy_pct", 0),
             "avg_daily_usd":    avg_daily_gross,
             "avg_daily_pct":    apy.get("avg_daily_pct", 0),

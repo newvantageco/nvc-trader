@@ -96,15 +96,15 @@ export default function AnalyticsPage() {
 
     await Promise.allSettled([
       fetch(`${API}/analytics`)
-        .then(r => r.json())
-        .then(d => setMetrics(d)),
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d) setMetrics(d) }),
 
       fetch(`${API}/account/snapshots?limit=168`)
-        .then(r => r.json())
+        .then(r => r.ok ? r.json() : { snapshots: [] })
         .then(d => setSnapshots(d.snapshots || [])),
 
       fetch(`${API}/cycles?limit=50`)
-        .then(r => r.json())
+        .then(r => r.ok ? r.json() : { cycles: [] })
         .then(d => setCycles(d.cycles || [])),
 
       fetch(`${API}/trades?limit=500`)
