@@ -94,6 +94,12 @@ class IndicatorEngine:
         # ── Volatility ────────────────────────────────────────────────────────
         atr = ta.atr(h, l, c, length=14)
         bbands = ta.bbands(c, length=20, std=2.0)
+        # pandas-ta column names vary by version (e.g. BBU_20_2.0 vs BBU_20_2)
+        # Use dynamic lookup so a version mismatch never crashes the whole TF
+        bb_upper = self._bb_col(bbands, "BBU")
+        bb_middle = self._bb_col(bbands, "BBM")
+        bb_lower = self._bb_col(bbands, "BBL")
+        bb_bw = self._bb_col(bbands, "BBB")
 
         # ── Levels ────────────────────────────────────────────────────────────
         pivot = self._pivot_points(df)
@@ -131,10 +137,10 @@ class IndicatorEngine:
             },
             "atr": self._last(atr),
             "bollinger": {
-                "upper": self._last(bbands["BBU_20_2.0"]) if bbands is not None else None,
-                "middle": self._last(bbands["BBM_20_2.0"]) if bbands is not None else None,
-                "lower": self._last(bbands["BBL_20_2.0"]) if bbands is not None else None,
-                "bandwidth": self._last(bbands["BBB_20_2.0"]) if bbands is not None else None,
+                "upper": self._last(bb_upper),
+                "middle": self._last(bb_middle),
+                "lower": self._last(bb_lower),
+                "bandwidth": self._last(bb_bw),
             },
             "pivots": pivot,
             "patterns": patterns,
@@ -250,6 +256,15 @@ class IndicatorEngine:
         if bullish:
             return bool(macd.iloc[-2] < sig.iloc[-2] and macd.iloc[-1] > sig.iloc[-1])
         return bool(macd.iloc[-2] > sig.iloc[-2] and macd.iloc[-1] < sig.iloc[-1])
+
+    @staticmethod
+    def _bb_col(bbands: pd.DataFrame | None, prefix: str) -> pd.Series | None:
+        """Return the first Bollinger Band column matching a prefix (e.g. 'BBU').
+        Handles version-dependent column names like BBU_20_2.0 vs BBU_20_2."""
+        if bbands is None:
+            return None
+        matches = [c for c in bbands.columns if str(c).startswith(prefix)]
+        return bbands[matches[0]] if matches else None
 
     @staticmethod
     def _last(series: pd.Series | None) -> float | None:

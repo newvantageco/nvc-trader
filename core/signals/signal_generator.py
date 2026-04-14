@@ -84,9 +84,22 @@ class SignalGenerator:
             risk_sentiment  = risk_sentiment,
         )
 
+        total_score = score_obj.total_score
+        if total_score >= 0.72:
+            edge_grade = "A++"
+        elif total_score >= 0.65:
+            edge_grade = "A+"
+        elif total_score >= 0.58:
+            edge_grade = "A"
+        else:
+            edge_grade = "FAIL"
+
         return {
             "instrument":      instrument,
-            "score":           score_obj.total_score,
+            "score":           total_score,
+            "edge_grade":      edge_grade,
+            "ta_score":        score_obj.ta_score,
+            "special_setup":   None,
             "direction":       score_obj.direction,
             "tradeable":       score_obj.tradeable and not blocked,
             "blackout":        blocked,

@@ -70,9 +70,12 @@ class ConfluenceEngine:
         sent_bias  = sentiment_data.get("bias", "neutral")
         sent_count = sentiment_data.get("article_count", 0)
 
-        # Low article count → reduce confidence
-        coverage_factor = min(sent_count / 10, 1.0)
-        sentiment_score = sent_norm * coverage_factor
+        # Low article count → not enough data to have a view, use neutral
+        if sent_count < 5:
+            sentiment_score = 0.5
+        else:
+            coverage_factor = min(sent_count / 10, 1.0)
+            sentiment_score = sent_norm * coverage_factor
         sent_direction  = "BUY" if sent_raw > 0.1 else "SELL" if sent_raw < -0.1 else "NEUTRAL"
 
         # ── 3. Momentum score ─────────────────────────────────────────────────
