@@ -5,6 +5,7 @@ import { RefreshCw, TrendingUp, Download, Activity, BarChart3 } from 'lucide-rea
 import dynamic from 'next/dynamic'
 import EmptyState from '@/components/EmptyState'
 import TradingCharts from '@/components/TradingCharts'
+import ErrorBoundary from '@/components/ErrorBoundary'
 import { api } from '@/lib/api'
 
 const EquityChart = dynamic(() => import('@/components/EquityChart'), { ssr: false })
@@ -175,7 +176,7 @@ export default function AnalyticsPage() {
           </div>
           {loading
             ? <Skeleton h={220} />
-            : <EquityChart snapshots={snapshots} height={220} />
+            : <ErrorBoundary><EquityChart snapshots={snapshots} height={220} /></ErrorBoundary>
           }
         </div>
 
@@ -221,7 +222,7 @@ export default function AnalyticsPage() {
                style={{ color: 'var(--text-muted)' }}>
             Trade Charts
           </div>
-          <TradingCharts />
+          <ErrorBoundary><TradingCharts /></ErrorBoundary>
         </div>
 
         {/* Per-instrument */}

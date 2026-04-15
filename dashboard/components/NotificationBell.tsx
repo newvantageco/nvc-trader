@@ -58,8 +58,11 @@ export default function NotificationBell() {
       for (const t of trades) {
         const dir = String(t.direction ?? '')
         const pnl = typeof t.pnl === 'number' ? t.pnl : null
+        const fillStatus = typeof t.fill === 'object' && t.fill !== null
+          ? String((t.fill as Record<string, unknown>).status ?? '')
+          : ''
         const isFilled = String(t.status ?? '').toUpperCase() === 'FILLED' ||
-                         String((t as any).fill?.status ?? '').toUpperCase() === 'FILLED'
+                         fillStatus.toUpperCase() === 'FILLED'
         if (!isFilled) continue
         notifs.push({
           id:         String(t.id ?? t.trade_id ?? Math.random()),

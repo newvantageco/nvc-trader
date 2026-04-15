@@ -1,12 +1,13 @@
 /**
  * lib/api.ts — Shared API fetch utility for NVC Trading dashboard
  *
- * Replaces repetitive try/catch fetch blocks across all pages.
- * Adapted from SightSync lib/api/errors.ts + notifications.ts patterns.
- *
- * Usage:
- *   const data = await api.get<SignalList>('/signals?limit=20')
- *   const result = await api.post('/trigger', { trigger: 'manual' })
+ * Features:
+ *  - 30s request timeout via AbortSignal.timeout
+ *  - Retry with exponential backoff (3× for network errors and 5xx; never 4xx)
+ *  - Stripe-style typed error codes matching FastAPI responses
+ *  - Convenience wrappers: api.get/post/patch/delete
+ *  - silentFetch — null on any error (fire-and-forget reads)
+ *  - errorMessage — human-readable error for toast messages
  */
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || 'https://nvc-trader.fly.dev'
@@ -24,17 +25,16 @@ export class APIError extends Error {
   }
 }
 
-// Stripe-style error codes — matches FastAPI error responses from the engine
 export const API_ERROR_CODES = {
-  NOT_FOUND:         'not_found',
-  UNAUTHORIZED:      'unauthorized',
-  VALIDATION_ERROR:  'validation_error',
-  CIRCUIT_BREAKER:   'circuit_breaker_active',
+  NOT_FOUND:            'not_found',
+  UNAUTHORIZED:         'unauthorized',
+  VALIDATION_ERROR:     'validation_error',
+  CIRCUIT_BREAKER:      'circuit_breaker_active',
   INSUFFICIENT_CREDITS: 'insufficient_credits',
-  BROKER_ERROR:      'broker_error',
-  RATE_LIMITED:      'rate_limited',
-  SERVER_ERROR:      'server_error',
-  NETWORK_ERROR:     'network_error',
+  BROKER_ERROR:         'broker_error',
+  RATE_LIMITED:         'rate_limited',
+  SERVER_ERROR:         'server_error',
+  NETWORK_ERROR:        'network_error',
 } as const
 
 export type APIErrorCode = typeof API_ERROR_CODES[keyof typeof API_ERROR_CODES]
@@ -49,46 +49,91 @@ function parseErrorCode(status: number, body: Record<string, unknown>): APIError
   return 'server_error'
 }
 
+// ── Retry config ─────────────────────────────────────────────────────────────
+
+const RETRY_ATTEMPTS  = 3
+const RETRY_BASE_MS   = 500   // 500ms → 1s → 2s
+const REQUEST_TIMEOUT = 30_000 // 30s
+
+function shouldRetry(err: unknown, attempt: number): boolean {
+  if (attempt >= RETRY_ATTEMPTS) return false
+  if (err instanceof APIError) {
+    // Retry server errors and network errors; never retry client errors (4xx)
+    return err.status === 0 || err.status >= 500
+  }
+  return false
+}
+
+function retryDelay(attempt: number): Promise<void> {
+  return new Promise(resolve =>
+    setTimeout(resolve, RETRY_BASE_MS * Math.pow(2, attempt))
+  )
+}
+
 // ── Core fetch ───────────────────────────────────────────────────────────────
 
 export async function apiFetch<T = unknown>(
   path:    string,
-  init?:   RequestInit,
+  init?:   RequestInit & { signal?: AbortSignal },
 ): Promise<T> {
-  let response: Response
-  try {
-    response = await fetch(`${BASE}${path}`, {
-      ...init,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(init?.headers ?? {}),
-      },
-    })
-  } catch (err) {
-    throw new APIError(0, 'network_error', err instanceof Error ? err.message : 'Network error')
+  let lastErr: unknown
+
+  for (let attempt = 0; attempt <= RETRY_ATTEMPTS; attempt++) {
+    if (attempt > 0) await retryDelay(attempt - 1)
+
+    // Build an AbortSignal that fires on timeout OR caller abort
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(new DOMException('Request timed out', 'TimeoutError')), REQUEST_TIMEOUT)
+    // If caller passed a signal, mirror it into our controller
+    init?.signal?.addEventListener('abort', () => controller.abort(init.signal!.reason), { once: true })
+    const signal = controller.signal
+
+    let response: Response
+    try {
+      response = await fetch(`${BASE}${path}`, {
+        ...init,
+        signal,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(init?.headers ?? {}),
+        },
+      })
+    } catch (err) {
+      clearTimeout(timer)
+      const msg = err instanceof Error ? err.message : 'Network error'
+      lastErr = new APIError(0, 'network_error', msg)
+      if (!shouldRetry(lastErr, attempt)) throw lastErr
+      continue
+    } finally {
+      clearTimeout(timer)
+    }
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({})) as Record<string, unknown>
+      const code = parseErrorCode(response.status, body)
+      const msg  = (body.detail ?? body.message ?? body.error ?? `HTTP ${response.status}`) as string
+      lastErr = new APIError(response.status, code, msg)
+      if (!shouldRetry(lastErr, attempt)) throw lastErr
+      continue
+    }
+
+    return response.json() as Promise<T>
   }
 
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({})) as Record<string, unknown>
-    const code = parseErrorCode(response.status, body)
-    const msg  = (body.detail ?? body.message ?? body.error ?? `HTTP ${response.status}`) as string
-    throw new APIError(response.status, code, msg)
-  }
-
-  return response.json() as Promise<T>
+  throw lastErr
 }
 
 // ── Convenience methods ──────────────────────────────────────────────────────
 
 export const api = {
-  get<T = unknown>(path: string): Promise<T> {
-    return apiFetch<T>(path)
+  get<T = unknown>(path: string, signal?: AbortSignal): Promise<T> {
+    return apiFetch<T>(path, signal ? { signal } : undefined)
   },
 
   post<T = unknown>(path: string, body?: unknown): Promise<T> {
     return apiFetch<T>(path, {
-      method:  'POST',
-      body:    body !== undefined ? JSON.stringify(body) : undefined,
+      method: 'POST',
+      body:   body !== undefined ? JSON.stringify(body) : undefined,
     })
   },
 

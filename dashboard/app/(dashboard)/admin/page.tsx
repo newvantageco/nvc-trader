@@ -5,6 +5,7 @@ import {
   TrendingUp, DollarSign, Server,
   BarChart2, Target, CheckCircle,
   Zap, Lock, ToggleLeft, ToggleRight, AlertTriangle, Shield,
+  type LucideProps,
 } from 'lucide-react'
 import { api, errorMessage } from '@/lib/api'
 
@@ -71,7 +72,7 @@ function StatCard({
   label, value, sub, icon: Icon, accent = false, warn = false
 }: {
   label: string; value: string; sub?: string
-  icon: React.ComponentType<any>
+  icon: React.ComponentType<LucideProps>
   accent?: boolean; warn?: boolean
 }) {
   const col = accent ? 'var(--accent)' : warn ? 'var(--bear)' : 'var(--bull)'
@@ -95,7 +96,7 @@ function StatCard({
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function SectionHeader({ title, icon: Icon }: {
   title: string
-  icon: React.ComponentType<any>
+  icon: React.ComponentType<LucideProps>
 }) {
   return (
     <div className="flex items-center gap-2 mb-4">

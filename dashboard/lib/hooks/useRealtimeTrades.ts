@@ -79,10 +79,27 @@ export interface UseRealtimeTradesResult {
   lastTrade:   TradeChange | null
 }
 
+// ── Supabase payload type (mirrors what Supabase sends for postgres_changes) ──
+
+interface SupabasePayload {
+  eventType: 'INSERT' | 'UPDATE' | 'DELETE'
+  old:       Record<string, unknown> | null
+  new:       Record<string, unknown>
+}
+
+interface SupabaseClient {
+  channel: (name: string) => SupabaseChannel
+  removeChannel: (ch: SupabaseChannel) => void
+}
+
+interface SupabaseChannel {
+  on: (event: string, filter: Record<string, unknown>, cb: (p: SupabasePayload) => void) => SupabaseChannel
+  subscribe: (cb: (status: string) => void) => SupabaseChannel
+}
+
 // ── Supabase client singleton ─────────────────────────────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let _client: any = null
+let _client: SupabaseClient | null = null
 
 function getClient() {
   if (_client) return _client
@@ -123,12 +140,11 @@ export function useRealtimeTrades({
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'signals' },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (payload: any) => {
+        (payload: SupabasePayload) => {
           const change: SignalChange = {
             eventType:  payload.eventType as RealtimeEvent,
-            old:        payload.old as Partial<SignalRow> | null,
-            new:        payload.new as SignalRow,
+            old:        payload.old as unknown as Partial<SignalRow> | null,
+            new:        payload.new as unknown as SignalRow,
             receivedAt: new Date().toISOString(),
           }
           setLastSignal(change)
@@ -139,20 +155,18 @@ export function useRealtimeTrades({
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'trades' },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (payload: any) => {
+        (payload: SupabasePayload) => {
           const change: TradeChange = {
             eventType:  payload.eventType as RealtimeEvent,
-            old:        payload.old as Partial<TradeRow> | null,
-            new:        payload.new as TradeRow,
+            old:        payload.old as unknown as Partial<TradeRow> | null,
+            new:        payload.new as unknown as TradeRow,
             receivedAt: new Date().toISOString(),
           }
           setLastTrade(change)
           onTradeRef.current?.(change)
         }
       )
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .subscribe((status: any) => {
+      .subscribe((status: string) => {
         setIsConnected(status === 'SUBSCRIBED')
       })
 
