@@ -99,12 +99,24 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+_ALLOWED_ORIGINS = [
+    # Vercel production + preview deployments
+    "https://dashboard-nvc-labs.vercel.app",
+    "https://nvc-labs.vercel.app",
+    # Vercel preview pattern — allow all *.vercel.app subdomains for the project
+    # (Next.js deploy previews get unique subdomains like dashboard-abc123-nvc-labs.vercel.app)
+]
+
+# Also allow all *.vercel.app previews and localhost in dev
+_ORIGIN_REGEX = r"https://dashboard.*\.vercel\.app|http://localhost(:\d+)?"
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_ALLOWED_ORIGINS,
+    allow_origin_regex=_ORIGIN_REGEX,
+    allow_credentials=False,   # dashboard uses NextAuth server-side; no cookies sent to engine
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 
