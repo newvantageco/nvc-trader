@@ -5,6 +5,7 @@ import { DesktopSidebar, MobileNav } from '@/components/Sidebar'
 import ToastContainer from '@/components/Toast'
 import CommandPalette from '@/components/CommandPalette'
 import SystemStatusBanner from '@/components/SystemStatusBanner'
+import PageTransition from '@/components/PageTransition'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -28,7 +29,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <SystemStatusBanner />
         {/* pb-14 leaves room for mobile bottom nav */}
         <main className="flex-1 overflow-hidden pb-14 sm:pb-0 min-w-0">
-          {children}
+          <PageTransition>{children}</PageTransition>
         </main>
       </div>
       <MobileNav />

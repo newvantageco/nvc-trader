@@ -3,8 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { TrendingUp, TrendingDown, Minus, RefreshCw, ChevronRight } from 'lucide-react'
 import { useNVCStore } from '@/lib/store'
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'https://nvc-trader.fly.dev'
+import { api, errorMessage } from '@/lib/api'
 
 interface ScanResult {
   instrument: string
@@ -92,20 +91,10 @@ function OpportunityCard({ result, circuitOk }: CardProps) {
     if (!canExecute) return
     setExecuting(true)
     try {
-      // Trigger a manual agent cycle focused on this instrument
-      const r = await fetch(`${API}/trigger`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trigger: `manual_${instrument}`, instrument }),
-      })
-      const data = await r.json()
-      if (r.ok) {
-        addToast({ type: 'success', title: 'Agent triggered', message: `Analysing ${instrument}...` })
-      } else {
-        addToast({ type: 'error', title: 'Trigger failed', message: data.detail || 'Unknown error' })
-      }
-    } catch {
-      addToast({ type: 'error', title: 'Network error', message: 'Could not reach the agent' })
+      await api.post('/trigger', { trigger: `manual_${instrument}`, instrument })
+      addToast({ type: 'success', title: 'Agent triggered', message: `Analysing ${instrument}...` })
+    } catch (err) {
+      addToast({ type: 'error', title: 'Trigger failed', message: errorMessage(err) })
     } finally {
       setExecuting(false)
     }
@@ -227,9 +216,7 @@ export default function OpportunityFeed() {
 
   const fetchScan = useCallback(async () => {
     try {
-      const r = await fetch(`${API}/scan`)
-      if (!r.ok) return
-      const data = await r.json()
+      const data = await api.get<{ signals?: ScanResult[] }>('/scan')
       const raw: ScanResult[] = data.signals || []
 
       // Sort: tradeable + high score first, then by score desc

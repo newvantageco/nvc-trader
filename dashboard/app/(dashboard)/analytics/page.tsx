@@ -198,18 +198,24 @@ export default function AnalyticsPage() {
             Performance Metrics
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <StatCard loading={loading} label="WIN RATE"        value={`${wr}%`}  sub={`${metrics?.winning_trades || 0}W / ${metrics?.losing_trades || 0}L`} color={parseFloat(wr) > 50 ? 'var(--bull)' : 'var(--bear)'} />
-            <StatCard loading={loading} label="PROFIT FACTOR"   value={pf}        sub="target >1.5" color={parseFloat(pf) > 1.5 ? 'var(--bull)' : 'var(--accent)'} />
-            <StatCard loading={loading} label="SHARPE RATIO"    value={sr}        sub="annualised"  color={parseFloat(sr) > 1 ? 'var(--bull)' : 'var(--accent)'} />
-            <StatCard loading={loading} label="EXPECTANCY"      value={exp}       sub="per trade"   color={(metrics?.expectancy_per_trade || 0) > 0 ? 'var(--bull)' : 'var(--bear)'} />
-            <StatCard loading={loading} label="NET P&L"         value={`$${(metrics?.net_pnl_usd || 0).toFixed(2)}`} color={(metrics?.net_pnl_usd || 0) >= 0 ? 'var(--bull)' : 'var(--bear)'} />
-            <StatCard loading={loading} label="AVG WIN"         value={`$${(metrics?.avg_win_usd || 0).toFixed(2)}`} color="var(--bull)" />
-            <StatCard loading={loading} label="AVG LOSS"        value={`$${(metrics?.avg_loss_usd || 0).toFixed(2)}`} color="var(--bear)" />
-            <StatCard loading={loading} label="KELLY FRACTION"  value={`${kly}%`} sub={`rec. ${metrics?.recommended_risk_pct?.toFixed(2) || '1.00'}% risk`} color="var(--accent)" />
-            <StatCard loading={loading} label="MAX CONSEC LOSS" value={String(metrics?.max_consecutive_losses || 0)} sub="reduce size at 3+" color={(metrics?.max_consecutive_losses || 0) >= 3 ? 'var(--bear)' : 'var(--text-primary)'} />
-            <StatCard loading={loading} label="BEST PAIR"       value={metrics?.best_instrument || '—'}  color="var(--bull)" />
-            <StatCard loading={loading} label="WORST PAIR"      value={metrics?.worst_instrument || '—'} color="var(--bear)" />
-            <StatCard loading={loading} label="TOTAL SIGNALS"   value={String(metrics?.total_signals || 0)} sub="all generated" />
+            {[
+              { label: 'WIN RATE',        value: `${wr}%`,      sub: `${metrics?.winning_trades || 0}W / ${metrics?.losing_trades || 0}L`, color: parseFloat(wr) > 50 ? 'var(--bull)' : 'var(--bear)' },
+              { label: 'PROFIT FACTOR',   value: pf,            sub: 'target >1.5',  color: parseFloat(pf) > 1.5 ? 'var(--bull)' : 'var(--accent)' },
+              { label: 'SHARPE RATIO',    value: sr,            sub: 'annualised',   color: parseFloat(sr) > 1   ? 'var(--bull)' : 'var(--accent)' },
+              { label: 'EXPECTANCY',      value: exp,           sub: 'per trade',    color: (metrics?.expectancy_per_trade || 0) > 0 ? 'var(--bull)' : 'var(--bear)' },
+              { label: 'NET P&L',         value: `$${(metrics?.net_pnl_usd || 0).toFixed(2)}`, color: (metrics?.net_pnl_usd || 0) >= 0 ? 'var(--bull)' : 'var(--bear)' },
+              { label: 'AVG WIN',         value: `$${(metrics?.avg_win_usd || 0).toFixed(2)}`,  color: 'var(--bull)' },
+              { label: 'AVG LOSS',        value: `$${(metrics?.avg_loss_usd || 0).toFixed(2)}`, color: 'var(--bear)' },
+              { label: 'KELLY FRACTION',  value: `${kly}%`, sub: `rec. ${metrics?.recommended_risk_pct?.toFixed(2) || '1.00'}% risk`, color: 'var(--accent)' },
+              { label: 'MAX CONSEC LOSS', value: String(metrics?.max_consecutive_losses || 0), sub: 'reduce size at 3+', color: (metrics?.max_consecutive_losses || 0) >= 3 ? 'var(--bear)' : 'var(--text-primary)' },
+              { label: 'BEST PAIR',       value: metrics?.best_instrument || '—',  color: 'var(--bull)' },
+              { label: 'WORST PAIR',      value: metrics?.worst_instrument || '—', color: 'var(--bear)' },
+              { label: 'TOTAL SIGNALS',   value: String(metrics?.total_signals || 0), sub: 'all generated' },
+            ].map((card, i) => (
+              <div key={card.label} className="stagger-item" style={{ '--stagger-i': i } as React.CSSProperties}>
+                <StatCard loading={loading} {...card} />
+              </div>
+            ))}
           </div>
 
           {/* Assessment banner */}

@@ -3,8 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { X } from 'lucide-react'
 import { useNVCStore } from '@/lib/store'
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'https://nvc-trader.fly.dev'
+import { api, errorMessage } from '@/lib/api'
 
 function usePrevious<T>(value: T) {
   const ref = useRef<T>(value)
@@ -41,15 +40,14 @@ export default function PositionTable() {
   const handleClose = async (ticket: number, instrument: string) => {
     setClosing(prev => new Set(prev).add(ticket))
     try {
-      const r = await fetch(`${API}/positions/${ticket}/close`, { method: 'DELETE' })
-      const data = await r.json()
+      const data = await api.delete<{ status: string; reason?: string }>(`/positions/${ticket}/close`)
       if (data.status === 'CLOSED' || data.status === 'CLOSE_DRY_RUN') {
         addToast({ type: 'success', title: 'Position closed', message: `${instrument} #${ticket}` })
       } else {
         addToast({ type: 'error', title: 'Close failed', message: data.reason || 'Unknown error' })
       }
-    } catch {
-      addToast({ type: 'error', title: 'Close failed', message: 'Network error' })
+    } catch (err) {
+      addToast({ type: 'error', title: 'Close failed', message: errorMessage(err) })
     } finally {
       setClosing(prev => {
         const next = new Set(prev)

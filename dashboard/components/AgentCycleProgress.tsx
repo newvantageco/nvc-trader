@@ -12,8 +12,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Zap, CheckCircle2, X, RefreshCw } from 'lucide-react'
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'https://nvc-trader.fly.dev'
+import { api } from '@/lib/api'
 
 interface Cycle {
   cycle_id:        string
@@ -67,9 +66,7 @@ export default function AgentCycleProgress() {
 
   const fetchCycle = useCallback(async () => {
     try {
-      const r = await fetch(`${API}/cycles?limit=1`)
-      if (!r.ok) return
-      const d = await r.json()
+      const d = await api.get<{ cycles?: Cycle[] }>('/cycles?limit=1')
       const latest: Cycle | undefined = d.cycles?.[0]
       if (!latest) return
 
