@@ -1,8 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'https://nvc-trader.fly.dev'
+import { api } from '@/lib/api'
 const SYMBOLS = ['GBPUSD', 'EURUSD', 'XAUUSD', 'USDJPY', 'USOIL']
 
 interface Price {
@@ -62,9 +61,8 @@ export default function PriceStrip() {
 
   useEffect(() => {
     const load = () =>
-      fetch(`${API}/prices?symbols=${SYMBOLS.join(',')}`)
-        .then(r => r.ok ? r.json() : null)
-        .then(d => { if (d) setPrices(d) })
+      api.get<Record<string, Price | null>>(`/prices?symbols=${SYMBOLS.join(',')}`)
+        .then(d => setPrices(d))
         .catch(() => {})
 
     load()

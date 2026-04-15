@@ -8,8 +8,7 @@ import {
   XCircle, Command,
 } from 'lucide-react'
 import { useNVCStore } from '@/lib/store'
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'https://nvc-trader.fly.dev'
+import { api, errorMessage } from '@/lib/api'
 
 const INSTRUMENTS = [
   'EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','NZDUSD','USDCHF',
@@ -109,20 +108,11 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
       const body = instrument
         ? { trigger: `manual_${instrument}`, instrument }
         : { trigger: 'manual_palette' }
-      const r = await fetch(`${API}/trigger`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      const data = await r.json().catch(() => ({}))
-      if (r.ok) {
-        addToast({ type: 'success', title: 'Agent cycle triggered',
-          message: instrument ? `Analysing ${instrument}…` : 'Full market scan started' })
-      } else {
-        addToast({ type: 'error', title: 'Trigger failed', message: data.detail || 'API error' })
-      }
-    } catch {
-      addToast({ type: 'error', title: 'Network error', message: 'Could not reach the engine' })
+      await api.post('/trigger', body)
+      addToast({ type: 'success', title: 'Agent cycle triggered',
+        message: instrument ? `Analysing ${instrument}…` : 'Full market scan started' })
+    } catch (err) {
+      addToast({ type: 'error', title: 'Trigger failed', message: errorMessage(err) })
     }
   }, [addToast, onClose])
 

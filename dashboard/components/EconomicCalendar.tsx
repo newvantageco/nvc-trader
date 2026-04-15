@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { format } from 'date-fns'
+import { api } from '@/lib/api'
 
 interface CalendarEvent {
   title: string
@@ -16,9 +17,7 @@ export default function EconomicCalendar() {
   const [events, setEvents] = useState<CalendarEvent[]>([])
 
   useEffect(() => {
-    const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-    fetch(`${API}/calendar?hours=24`)
-      .then(r => r.json())
+    api.get<{ events: CalendarEvent[] }>('/calendar?hours=24')
       .then(d => setEvents(d.events || []))
       .catch(() => {})
   }, [])

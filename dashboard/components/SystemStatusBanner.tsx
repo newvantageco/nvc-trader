@@ -15,8 +15,7 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle, ShieldOff, X } from 'lucide-react'
 import { useNVCStore } from '@/lib/store'
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'https://nvc-trader.fly.dev'
+import { api } from '@/lib/api'
 
 type BannerType = 'hard_stop' | 'halted' | 'weekly_hit' | null
 
@@ -43,13 +42,11 @@ export default function SystemStatusBanner() {
     let timer: ReturnType<typeof setInterval>
     async function check() {
       try {
-        const r = await fetch(`${API}/account`)
-        if (!r.ok) return
-        const d = await r.json()
-        const cb = d.circuit_breaker
-        if (cb?.hard_stop)                  setType('hard_stop')
+        const d = await api.get<typeof account>('/account')
+        const cb = d?.circuit_breaker
+        if (cb?.hard_stop)                     setType('hard_stop')
         else if (cb?.trading_allowed === false) setType('halted')
-        else if (cb?.weekly_limit_hit)      setType('weekly_hit')
+        else if (cb?.weekly_limit_hit)         setType('weekly_hit')
         else setType(null)
       } catch { /* silent */ }
     }

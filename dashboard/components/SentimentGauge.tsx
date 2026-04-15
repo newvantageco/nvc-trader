@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { api } from '@/lib/api'
 
 interface Props {
   instrument: string
@@ -17,18 +18,13 @@ export default function SentimentGauge({ instrument }: Props) {
   const [data, setData] = useState<SentimentData | null>(null)
 
   useEffect(() => {
-    const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-    fetch(`${API}/sentiment/${instrument}`)
-      .then(r => r.json())
-      .then(d => setData(d))
-      .catch(() => {})
-
-    const interval = setInterval(() => {
-      fetch(`${API}/sentiment/${instrument}`)
-        .then(r => r.json())
+    const load = () =>
+      api.get<SentimentData>(`/sentiment/${instrument}`)
         .then(d => setData(d))
         .catch(() => {})
-    }, 60_000)
+
+    load()
+    const interval = setInterval(load, 60_000)
     return () => clearInterval(interval)
   }, [instrument])
 

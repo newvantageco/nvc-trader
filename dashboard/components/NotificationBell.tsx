@@ -10,8 +10,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Bell, X, TrendingUp, TrendingDown, Zap, CheckCheck } from 'lucide-react'
-
-const API      = process.env.NEXT_PUBLIC_API_URL || 'https://nvc-trader.fly.dev'
+import { api } from '@/lib/api'
 const LS_KEY   = 'nvc_notif_last_seen'
 
 interface NVCNotification {
@@ -48,8 +47,8 @@ export default function NotificationBell() {
 
   const buildNotifications = useCallback(async (): Promise<NVCNotification[]> => {
     const [tradesRes, cyclesRes] = await Promise.allSettled([
-      fetch(`${API}/trades?limit=10`).then(r => r.ok ? r.json() : { trades: [] }),
-      fetch(`${API}/cycles?limit=5`).then(r => r.ok ? r.json() : { cycles: [] }),
+      api.get<{ trades: Array<Record<string, unknown>> }>('/trades?limit=10').catch(() => ({ trades: [] })),
+      api.get<{ cycles: Array<Record<string, unknown>> }>('/cycles?limit=5').catch(() => ({ cycles: [] })),
     ])
 
     const notifs: NVCNotification[] = []

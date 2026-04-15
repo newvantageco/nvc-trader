@@ -6,8 +6,7 @@ import {
   BarChart2, Target, CheckCircle,
   Zap, Lock, ToggleLeft, ToggleRight, AlertTriangle, Shield,
 } from 'lucide-react'
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'https://nvc-trader.fly.dev'
+import { api, errorMessage } from '@/lib/api'
 
 interface AdminData {
   performance: {
@@ -123,8 +122,7 @@ function TradingModePanel() {
   const [error, setError]     = useState('')
 
   const fetchMode = () =>
-    fetch(`${API_URL}/admin/trading-mode`)
-      .then(r => r.json())
+    api.get<TradingMode>('/admin/trading-mode')
       .then(setMode)
       .catch(() => {})
 
@@ -138,17 +136,11 @@ function TradingModePanel() {
     setSw(true)
     setError('')
     try {
-      const r = await fetch(`${API_URL}/admin/trading-mode`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: target }),
-      })
-      const data = await r.json()
-      if (!r.ok) { setError(data.detail || 'Switch failed'); return }
+      await api.post('/admin/trading-mode', { mode: target })
       await fetchMode()
       setConfirm(false)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Network error')
+      setError(errorMessage(e))
     } finally {
       setSw(false)
     }
@@ -293,13 +285,9 @@ export default function AdminPage() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    fetch(`${API_URL}/admin/overview`)
-      .then(r => {
-        if (!r.ok) throw new Error(`API error ${r.status}`)
-        return r.json()
-      })
+    api.get<AdminData>('/admin/overview')
       .then(d => { setData(d); setLoading(false) })
-      .catch(e => { setError(e.message); setLoading(false) })
+      .catch(e => { setError(errorMessage(e)); setLoading(false) })
   }, [])
 
   if (loading) {

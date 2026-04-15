@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useNVCStore } from '@/lib/store'
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'https://nvc-trader.fly.dev'
+import { api, errorMessage } from '@/lib/api'
 
 const WATCHLIST = ['EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','NZDUSD','USDCHF','EURJPY','GBPJPY','XAUUSD','XAGUSD','USOIL','UKOIL','NATGAS']
 
@@ -73,14 +72,12 @@ export default function SettingsPage() {
   const [status,   setStatus]   = useState<{ system_status?: string; broker?: string } | null>(null)
 
   useEffect(() => {
-    fetch(`${API}/settings`)
-      .then(r => r.ok ? r.json() : null)
+    api.get<Settings>('/settings')
       .then(d => { if (d && Object.keys(d).length) setSettings({ ...DEFAULTS, ...d }) })
       .catch(() => {})
 
-    fetch(`${API}/account`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d) setStatus(d) })
+    api.get<{ system_status?: string; broker?: string }>('/account')
+      .then(d => setStatus(d))
       .catch(() => {})
   }, [])
 
@@ -98,18 +95,13 @@ export default function SettingsPage() {
     }
     setSaving(true)
     try {
-      const r = await fetch(`${API}/settings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings),
-      })
-      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      await api.post('/settings', settings)
       setSaveState('saved')
       addToast({ type: 'success', title: 'Settings saved', message: 'Risk parameters updated' })
       setTimeout(() => setSaveState('idle'), 2500)
     } catch (err) {
       setSaveState('error')
-      addToast({ type: 'error', title: 'Save failed', message: 'Could not reach the engine' })
+      addToast({ type: 'error', title: 'Save failed', message: errorMessage(err) })
       setTimeout(() => setSaveState('idle'), 3000)
     } finally {
       setSaving(false)

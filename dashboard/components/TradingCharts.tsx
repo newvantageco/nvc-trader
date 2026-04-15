@@ -20,8 +20,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import { TrendingUp, BarChart3, PieChart as PieIcon } from 'lucide-react'
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'https://nvc-trader.fly.dev'
+import { api } from '@/lib/api'
 
 type Range = '7d' | '30d' | '90d'
 
@@ -136,9 +135,7 @@ export default function TradingCharts() {
     setLoading(true)
     setError(false)
     try {
-      const r = await fetch(`${API}/trades?limit=500`)
-      if (!r.ok) throw new Error('fetch failed')
-      const d = await r.json()
+      const d = await api.get<{ trades?: TradeRow[] }>('/trades?limit=500')
       setTrades(d.trades || [])
     } catch {
       setError(true)

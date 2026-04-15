@@ -3,9 +3,9 @@
 import { useEffect, useState, useCallback } from 'react'
 import { RefreshCw, Calendar } from 'lucide-react'
 import EmptyState from '@/components/EmptyState'
+import { api, silentFetch } from '@/lib/api'
 
 const WATCHLIST = ['EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','NZDUSD','USDCHF','EURJPY','GBPJPY','XAUUSD','XAGUSD','USOIL','UKOIL','NATGAS']
-const API = process.env.NEXT_PUBLIC_API_URL || 'https://nvc-trader.fly.dev'
 
 interface SentimentData {
   score: number
@@ -66,10 +66,8 @@ export default function MarketsPage() {
     const results: Record<string, SentimentData> = {}
     await Promise.allSettled(
       WATCHLIST.map(async sym => {
-        try {
-          const r = await fetch(`${API}/sentiment/${sym}`)
-          if (r.ok) results[sym] = await r.json()
-        } catch {}
+        const d = await silentFetch<SentimentData>(`/sentiment/${sym}`)
+        if (d) results[sym] = d
       })
     )
     setSentiments(results)
@@ -81,8 +79,8 @@ export default function MarketsPage() {
   const fetchCalendar = useCallback(async (silent = false) => {
     if (silent) setRefreshingCal(true)
     try {
-      const r = await fetch(`${API}/calendar?hours=24`)
-      if (r.ok) setCalendar(await r.json())
+      const d = await api.get<{ events: CalEvent[]; blackouts: unknown[] }>('/calendar?hours=24')
+      setCalendar(d)
     } catch {}
     setLoadingCal(false)
     setRefreshingCal(false)

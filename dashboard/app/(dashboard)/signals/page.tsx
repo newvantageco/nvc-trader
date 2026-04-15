@@ -5,6 +5,7 @@ import { Search, Copy, Check, Activity, ChevronDown, ChevronUp, Wifi, WifiOff } 
 import StatusBadge from '@/components/StatusBadge'
 import EmptyState from '@/components/EmptyState'
 import { useRealtimeTrades, type SignalChange } from '@/lib/hooks/useRealtimeTrades'
+import { api } from '@/lib/api'
 
 interface Signal {
   id: string
@@ -18,7 +19,6 @@ interface Signal {
   created_at: string
 }
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'https://nvc-trader.fly.dev'
 
 const INSTRUMENTS = ['EURUSD','GBPUSD','USDJPY','XAUUSD','USOIL','USDCAD','AUDUSD','GBPJPY']
 
@@ -91,27 +91,24 @@ export default function SignalsPage() {
 
   // ── Initial load ─────────────────────────────────────────────────────────
   useEffect(() => {
-    fetch(`${API}/signals?limit=${PAGE_SIZE}&offset=0`)
-      .then(r => r.json())
+    api.get<{ signals?: Signal[] }>(`/signals?limit=${PAGE_SIZE}&offset=0`)
       .then(d => {
         const rows = d.signals || []
         setSignals(rows)
         setOffset(rows.length)
         setHasMore(rows.length === PAGE_SIZE)
-        setLoading(false)
       })
-      .catch(() => setLoading(false))
+      .catch(() => {})
+      .finally(() => setLoading(false))
   }, [])
 
   // ── Polling fallback (slower when Realtime is connected) ──────────────────
   useEffect(() => {
     const interval = rtConnected ? 5 * 60_000 : 15_000
     const t = setInterval(() => {
-      fetch(`${API}/signals?limit=${PAGE_SIZE}&offset=0`)
-        .then(r => r.json())
+      api.get<{ signals?: Signal[] }>(`/signals?limit=${PAGE_SIZE}&offset=0`)
         .then(d => {
           const rows = d.signals || []
-          // Merge new rows at top without blowing away loaded history
           setSignals(prev => {
             const ids = new Set(prev.map(s => s.id))
             const fresh = rows.filter((s: Signal) => !ids.has(s.id))
@@ -128,8 +125,7 @@ export default function SignalsPage() {
     if (loadingMore || !hasMore) return
     setLoadingMore(true)
     try {
-      const r = await fetch(`${API}/signals?limit=${PAGE_SIZE}&offset=${offset}`)
-      const d = await r.json()
+      const d = await api.get<{ signals?: Signal[] }>(`/signals?limit=${PAGE_SIZE}&offset=${offset}`)
       const rows: Signal[] = d.signals || []
       setSignals(prev => {
         const ids = new Set(prev.map(s => s.id))

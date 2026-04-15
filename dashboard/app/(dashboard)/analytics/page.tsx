@@ -5,10 +5,10 @@ import { RefreshCw, TrendingUp, Download, Activity, BarChart3 } from 'lucide-rea
 import dynamic from 'next/dynamic'
 import EmptyState from '@/components/EmptyState'
 import TradingCharts from '@/components/TradingCharts'
+import { api } from '@/lib/api'
 
 const EquityChart = dynamic(() => import('@/components/EquityChart'), { ssr: false })
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'https://nvc-trader.fly.dev'
 
 interface Metrics {
   total_trades: number
@@ -97,22 +97,10 @@ export default function AnalyticsPage() {
     else setRefreshing(true)
 
     await Promise.allSettled([
-      fetch(`${API}/analytics`)
-        .then(r => r.ok ? r.json() : null)
-        .then(d => { if (d) setMetrics(d) }),
-
-      fetch(`${API}/account/snapshots?limit=168`)
-        .then(r => r.ok ? r.json() : { snapshots: [] })
-        .then(d => setSnapshots(d.snapshots || [])),
-
-      fetch(`${API}/cycles?limit=50`)
-        .then(r => r.ok ? r.json() : { cycles: [] })
-        .then(d => setCycles(d.cycles || [])),
-
-      fetch(`${API}/trades?limit=500`)
-        .then(r => r.ok ? r.json() : { trades: [] })
-        .then(d => setTrades(d.trades || []))
-        .catch(() => {}),
+      api.get<Metrics>('/analytics').then(d => setMetrics(d)).catch(() => {}),
+      api.get<{ snapshots: Snapshot[] }>('/account/snapshots?limit=168').then(d => setSnapshots(d.snapshots || [])).catch(() => {}),
+      api.get<{ cycles: Array<{ cycle_id: string; timestamp: string; trades_executed: number; trigger: string }> }>('/cycles?limit=50').then(d => setCycles(d.cycles || [])).catch(() => {}),
+      api.get<{ trades: Array<Record<string, unknown>> }>('/trades?limit=500').then(d => setTrades(d.trades || [])).catch(() => {}),
     ])
 
     setLoading(false)

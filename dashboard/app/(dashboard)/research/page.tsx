@@ -3,8 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { RefreshCw, ExternalLink, Play, BookOpen } from 'lucide-react'
 import EmptyState from '@/components/EmptyState'
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'https://nvc-trader.fly.dev'
+import { api } from '@/lib/api'
 
 const CATEGORIES = [
   { key: 'all',   label: 'All' },
@@ -152,11 +151,8 @@ export default function ResearchPage() {
     if (!silent) setLoading(true)
     else setRefreshing(true)
     try {
-      const r = await fetch(`${API}/research/feed?category=${cat}`)
-      if (r.ok) {
-        const d = await r.json()
-        setVideos(d.videos || [])
-      }
+      const d = await api.get<{ videos?: Video[] }>(`/research/feed?category=${cat}`)
+      setVideos(d.videos || [])
     } catch {}
     setLoading(false)
     setRefreshing(false)
