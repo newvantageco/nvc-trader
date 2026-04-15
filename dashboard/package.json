@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.103.0",
     "clsx": "2.1.1",
     "date-fns": "3.6.0",
     "lightweight-charts": "4.1.3",

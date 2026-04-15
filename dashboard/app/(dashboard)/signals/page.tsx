@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
-import { Search, Copy, Check, Activity, ChevronDown, ChevronUp } from 'lucide-react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
+import { Search, Copy, Check, Activity, ChevronDown, ChevronUp, Wifi, WifiOff } from 'lucide-react'
 import StatusBadge from '@/components/StatusBadge'
 import EmptyState from '@/components/EmptyState'
+import { useRealtimeTrades, type SignalChange } from '@/lib/hooks/useRealtimeTrades'
 
 interface Signal {
   id: string
@@ -70,20 +71,35 @@ export default function SignalsPage() {
   const [symFilter, setSymFilter] = useState('ALL')
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'FILLED' | 'PENDING'>('ALL')
 
+  // ── Supabase Realtime — live signal/fill updates ──────────────────────────
+  const { isConnected: rtConnected } = useRealtimeTrades({
+    onSignal: useCallback((change: SignalChange) => {
+      if (change.eventType === 'INSERT') {
+        setSignals(prev => [change.new as unknown as Signal, ...prev].slice(0, 200))
+      } else if (change.eventType === 'UPDATE') {
+        setSignals(prev => prev.map(s =>
+          s.id === change.new.id ? { ...s, ...(change.new as unknown as Signal) } : s
+        ))
+      }
+    }, []),
+  })
+
+  // ── Polling fallback (slower when Realtime is connected) ──────────────────
   useEffect(() => {
     fetch(`${API}/signals?limit=100`)
       .then(r => r.json())
       .then(d => { setSignals(d.signals || []); setLoading(false) })
       .catch(() => setLoading(false))
 
+    const interval = rtConnected ? 5 * 60_000 : 15_000
     const t = setInterval(() => {
       fetch(`${API}/signals?limit=100`)
         .then(r => r.json())
         .then(d => setSignals(d.signals || []))
         .catch(() => {})
-    }, 15_000)
+    }, interval)
     return () => clearInterval(t)
-  }, [])
+  }, [rtConnected])
 
   const filtered = useMemo(() => signals.filter(s => {
     if (dirFilter !== 'ALL' && s.direction !== dirFilter) return false
@@ -107,10 +123,27 @@ export default function SignalsPage() {
           <h1 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>Signal History</h1>
           <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>All Claude-generated trade signals</p>
         </div>
-        <span className="font-mono text-xs px-2 py-1 rounded"
-              style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}>
-          {filtered.length} / {signals.length}
-        </span>
+        <div className="flex items-center gap-2">
+          {/* Realtime connection indicator */}
+          <span
+            className="flex items-center gap-1.5 text-[10px] font-mono px-2 py-1 rounded"
+            style={{
+              background: 'var(--bg-elevated)',
+              color:      rtConnected ? 'var(--bull)' : 'var(--text-muted)',
+              border:     `1px solid ${rtConnected ? 'rgba(46,168,74,0.3)' : 'var(--border)'}`,
+            }}
+            title={rtConnected ? 'Supabase Realtime connected — signals stream live' : 'Polling every 15s'}
+          >
+            {rtConnected
+              ? <><span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'var(--bull)' }} /> LIVE</>
+              : <><WifiOff size={10} /> POLL</>
+            }
+          </span>
+          <span className="font-mono text-xs px-2 py-1 rounded"
+                style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}>
+            {filtered.length} / {signals.length}
+          </span>
+        </div>
       </div>
 
       {/* Filter bar */}
