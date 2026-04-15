@@ -8,6 +8,7 @@ import {
   Zap, Search,
 } from 'lucide-react'
 import { useNVCStore } from '@/lib/store'
+import NotificationBell from '@/components/NotificationBell'
 
 const NAV = [
   { href: '/',          label: 'Overview',   icon: LayoutDashboard, primary: true },
@@ -138,7 +139,7 @@ export function DesktopSidebar({ onOpenPalette }: { onOpenPalette?: () => void }
           style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
         >
           <AgentDot />
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
               Vantage AI
             </div>
@@ -146,6 +147,7 @@ export function DesktopSidebar({ onOpenPalette }: { onOpenPalette?: () => void }
               claude-opus-4-6
             </div>
           </div>
+          <NotificationBell />
         </div>
       </div>
     </aside>

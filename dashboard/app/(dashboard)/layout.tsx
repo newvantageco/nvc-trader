@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { DesktopSidebar, MobileNav } from '@/components/Sidebar'
 import ToastContainer from '@/components/Toast'
 import CommandPalette from '@/components/CommandPalette'
+import SystemStatusBanner from '@/components/SystemStatusBanner'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -22,10 +23,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: 'var(--bg-base)' }}>
       <DesktopSidebar onOpenPalette={() => setPaletteOpen(true)} />
-      {/* pb-14 leaves room for mobile bottom nav */}
-      <main className="flex-1 overflow-hidden pb-14 sm:pb-0 min-w-0">
-        {children}
-      </main>
+      <div className="flex flex-col flex-1 overflow-hidden min-w-0">
+        {/* SystemStatusBanner sits above all page content, under the sidebar */}
+        <SystemStatusBanner />
+        {/* pb-14 leaves room for mobile bottom nav */}
+        <main className="flex-1 overflow-hidden pb-14 sm:pb-0 min-w-0">
+          {children}
+        </main>
+      </div>
       <MobileNav />
       <ToastContainer />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />

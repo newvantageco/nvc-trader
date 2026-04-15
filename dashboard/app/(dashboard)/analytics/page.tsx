@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { RefreshCw, TrendingUp, Download, Activity, BarChart3 } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import EmptyState from '@/components/EmptyState'
+import TradingCharts from '@/components/TradingCharts'
 
 const EquityChart = dynamic(() => import('@/components/EquityChart'), { ssr: false })
 
@@ -218,6 +219,15 @@ export default function AnalyticsPage() {
               {metrics.assessment}
             </div>
           )}
+        </div>
+
+        {/* Recharts trading charts — daily P&L, instrument bars, outcome donut */}
+        <div>
+          <div className="text-xs font-semibold tracking-wider mb-3 uppercase"
+               style={{ color: 'var(--text-muted)' }}>
+            Trade Charts
+          </div>
+          <TradingCharts />
         </div>
 
         {/* Per-instrument */}

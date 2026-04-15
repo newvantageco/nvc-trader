@@ -10,6 +10,7 @@ import PositionTable from '@/components/PositionTable'
 import EconomicCalendar from '@/components/EconomicCalendar'
 import AgentStatus from '@/components/AgentStatus'
 import MarketSessionBar from '@/components/MarketSessionBar'
+import AgentCycleProgress from '@/components/AgentCycleProgress'
 
 const PriceStrip = dynamic(() => import('@/components/PriceStrip'), { ssr: false })
 
@@ -106,6 +107,9 @@ export default function Terminal() {
 
       {/* ── Hero metrics ────────────────────────────────────────────────────── */}
       <HeroMetrics />
+
+      {/* ── Agent cycle progress (only visible when cycle is running/recent) ── */}
+      <AgentCycleProgress />
 
       {/* ── Divider ─────────────────────────────────────────────────────────── */}
       <div className="flex-shrink-0" style={{ borderBottom: '1px solid var(--border)' }} />
