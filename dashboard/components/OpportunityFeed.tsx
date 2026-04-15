@@ -306,8 +306,14 @@ export default function OpportunityFeed() {
                 <div className="section-label px-1 pt-1 pb-1.5">
                   Opportunities ({tradeable.length})
                 </div>
-                {tradeable.map(r => (
-                  <OpportunityCard key={r.instrument} result={r} circuitOk={circuitOk} />
+                {tradeable.map((r, i) => (
+                  <div
+                    key={r.instrument}
+                    className="stagger-item"
+                    style={{ '--stagger-i': i } as React.CSSProperties}
+                  >
+                    <OpportunityCard result={r} circuitOk={circuitOk} />
+                  </div>
                 ))}
               </>
             )}
@@ -318,8 +324,14 @@ export default function OpportunityFeed() {
                 <div className="section-label px-1 pt-3 pb-1.5">
                   Monitoring ({watching.length})
                 </div>
-                {watching.map(r => (
-                  <OpportunityCard key={r.instrument} result={r} circuitOk={circuitOk} />
+                {watching.map((r, i) => (
+                  <div
+                    key={r.instrument}
+                    className="stagger-item"
+                    style={{ '--stagger-i': tradeable.length + i } as React.CSSProperties}
+                  >
+                    <OpportunityCard result={r} circuitOk={circuitOk} />
+                  </div>
                 ))}
               </>
             )}

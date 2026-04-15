@@ -62,13 +62,18 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
+const PAGE_SIZE = 30
+
 export default function SignalsPage() {
-  const [signals,   setSignals]   = useState<Signal[]>([])
-  const [loading,   setLoading]   = useState(true)
-  const [expanded,  setExpanded]  = useState<Set<string>>(new Set())
-  const [search,    setSearch]    = useState('')
-  const [dirFilter, setDirFilter] = useState<'ALL' | 'BUY' | 'SELL'>('ALL')
-  const [symFilter, setSymFilter] = useState('ALL')
+  const [signals,      setSignals]      = useState<Signal[]>([])
+  const [loading,      setLoading]      = useState(true)
+  const [loadingMore,  setLoadingMore]  = useState(false)
+  const [hasMore,      setHasMore]      = useState(true)
+  const [offset,       setOffset]       = useState(0)
+  const [expanded,     setExpanded]     = useState<Set<string>>(new Set())
+  const [search,       setSearch]       = useState('')
+  const [dirFilter,    setDirFilter]    = useState<'ALL' | 'BUY' | 'SELL'>('ALL')
+  const [symFilter,    setSymFilter]    = useState('ALL')
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'FILLED' | 'PENDING'>('ALL')
 
   // ── Supabase Realtime — live signal/fill updates ──────────────────────────
@@ -84,22 +89,57 @@ export default function SignalsPage() {
     }, []),
   })
 
+  // ── Initial load ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    fetch(`${API}/signals?limit=${PAGE_SIZE}&offset=0`)
+      .then(r => r.json())
+      .then(d => {
+        const rows = d.signals || []
+        setSignals(rows)
+        setOffset(rows.length)
+        setHasMore(rows.length === PAGE_SIZE)
+        setLoading(false)
+      })
+      .catch(() => setLoading(false))
+  }, [])
+
   // ── Polling fallback (slower when Realtime is connected) ──────────────────
   useEffect(() => {
-    fetch(`${API}/signals?limit=100`)
-      .then(r => r.json())
-      .then(d => { setSignals(d.signals || []); setLoading(false) })
-      .catch(() => setLoading(false))
-
     const interval = rtConnected ? 5 * 60_000 : 15_000
     const t = setInterval(() => {
-      fetch(`${API}/signals?limit=100`)
+      fetch(`${API}/signals?limit=${PAGE_SIZE}&offset=0`)
         .then(r => r.json())
-        .then(d => setSignals(d.signals || []))
+        .then(d => {
+          const rows = d.signals || []
+          // Merge new rows at top without blowing away loaded history
+          setSignals(prev => {
+            const ids = new Set(prev.map(s => s.id))
+            const fresh = rows.filter((s: Signal) => !ids.has(s.id))
+            return [...fresh, ...prev]
+          })
+        })
         .catch(() => {})
     }, interval)
     return () => clearInterval(t)
   }, [rtConnected])
+
+  // ── Load more ──────────────────────────────────────────────────────────────
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return
+    setLoadingMore(true)
+    try {
+      const r = await fetch(`${API}/signals?limit=${PAGE_SIZE}&offset=${offset}`)
+      const d = await r.json()
+      const rows: Signal[] = d.signals || []
+      setSignals(prev => {
+        const ids = new Set(prev.map(s => s.id))
+        return [...prev, ...rows.filter(s => !ids.has(s.id))]
+      })
+      setOffset(prev => prev + rows.length)
+      setHasMore(rows.length === PAGE_SIZE)
+    } catch { /* silent */ }
+    finally { setLoadingMore(false) }
+  }, [offset, hasMore, loadingMore])
 
   const filtered = useMemo(() => signals.filter(s => {
     if (dirFilter !== 'ALL' && s.direction !== dirFilter) return false
@@ -329,6 +369,28 @@ export default function SignalsPage() {
               body={signals.length > 0 ? 'No signals match your current filters.' : 'Agent hasn\'t generated any signals yet. Signals appear after the first cycle.'}
               compact
             />
+          )}
+
+          {/* Load more */}
+          {!loading && hasMore && filtered.length > 0 && (
+            <div className="flex justify-center py-4">
+              <button
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="flex items-center gap-2 px-4 py-2 rounded text-xs font-mono font-semibold transition-opacity disabled:opacity-50"
+                style={{
+                  background: 'var(--bg-elevated)',
+                  color:      'var(--text-secondary)',
+                  border:     '1px solid var(--border)',
+                }}
+              >
+                {loadingMore ? (
+                  <><span className="animate-spin">⟳</span> Loading…</>
+                ) : (
+                  <>Load more · {signals.length} loaded</>
+                )}
+              </button>
+            </div>
           )}
         </div>
       </div>

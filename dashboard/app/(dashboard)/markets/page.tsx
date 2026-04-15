@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, Calendar } from 'lucide-react'
+import EmptyState from '@/components/EmptyState'
 
 const WATCHLIST = ['EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','NZDUSD','USDCHF','EURJPY','GBPJPY','XAUUSD','XAGUSD','USOIL','UKOIL','NATGAS']
 const API = process.env.NEXT_PUBLIC_API_URL || 'https://nvc-trader.fly.dev'
@@ -209,9 +210,12 @@ export default function MarketsPage() {
                 ))}
               </div>
             ) : calendar.events.length === 0 ? (
-              <div className="text-xs py-4 text-center font-mono" style={{ color: 'var(--text-muted)' }}>
-                No events in next 24h
-              </div>
+              <EmptyState
+                icon={Calendar}
+                title="No events"
+                body="No high-impact events in the next 24 hours."
+                compact
+              />
             ) : (
               calendar.events.map((e, i) => {
                 const impactColor = e.impact === 'high' ? 'var(--bear)' : e.impact === 'medium' ? 'var(--accent)' : 'var(--text-muted)'

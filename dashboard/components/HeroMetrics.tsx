@@ -111,8 +111,8 @@ export default function HeroMetrics() {
       {/* Equity */}
       {/* Equity — animated number */}
       <div
-        className="flex items-center gap-3 px-4 py-3 rounded-lg flex-1 min-w-0"
-        style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
+        className="stagger-item flex items-center gap-3 px-4 py-3 rounded-lg flex-1 min-w-0"
+        style={{ '--stagger-i': 0, background: 'var(--bg-card)', border: '1px solid var(--border)' } as React.CSSProperties}
       >
         <div className="w-8 h-8 rounded flex items-center justify-center flex-shrink-0"
              style={{ background: 'var(--bg-elevated)' }}>
@@ -132,11 +132,12 @@ export default function HeroMetrics() {
 
       {/* Float P&L — animated */}
       <div
-        className="flex items-center gap-3 px-4 py-3 rounded-lg flex-1 min-w-0"
+        className="stagger-item flex items-center gap-3 px-4 py-3 rounded-lg flex-1 min-w-0"
         style={{
+          '--stagger-i': 1,
           background: plPositive ? 'rgba(46,168,74,0.04)' : 'rgba(229,72,62,0.04)',
           border: '1px solid var(--border)',
-        }}
+        } as React.CSSProperties}
       >
         <div className="w-8 h-8 rounded flex items-center justify-center flex-shrink-0"
              style={{ background: 'var(--bg-elevated)' }}>
@@ -158,18 +159,20 @@ export default function HeroMetrics() {
       </div>
 
       {/* Circuit Breaker */}
-      <MetricCard
-        label="Circuit Breaker"
-        value={cbLabel}
-        sub={cbSub}
-        color={cbColor}
-        icon={
-          cbHard || cbHalt
-            ? <ShieldOff size={15} style={{ color: 'var(--bear)' }} />
-            : <Shield size={15} style={{ color: cbColor }} />
-        }
-        bg={cbBg}
-      />
+      <div className="stagger-item" style={{ '--stagger-i': 2, flex: 1, minWidth: 0 } as React.CSSProperties}>
+        <MetricCard
+          label="Circuit Breaker"
+          value={cbLabel}
+          sub={cbSub}
+          color={cbColor}
+          icon={
+            cbHard || cbHalt
+              ? <ShieldOff size={15} style={{ color: 'var(--bear)' }} />
+              : <Shield size={15} style={{ color: cbColor }} />
+          }
+          bg={cbBg}
+        />
+      </div>
     </div>
   )
 }

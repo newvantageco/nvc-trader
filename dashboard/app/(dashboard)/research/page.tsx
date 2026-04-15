@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, ExternalLink, Play } from 'lucide-react'
+import { RefreshCw, ExternalLink, Play, BookOpen } from 'lucide-react'
+import EmptyState from '@/components/EmptyState'
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'https://nvc-trader.fly.dev'
 
@@ -230,12 +231,12 @@ export default function ResearchPage() {
             {[...Array(12)].map((_, i) => <SkeletonCard key={i} />)}
           </div>
         ) : videos.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-48 gap-2">
-            <ExternalLink size={24} style={{ color: 'var(--text-muted)' }} />
-            <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>
-              No videos fetched — check backend connectivity
-            </span>
-          </div>
+          <EmptyState
+            icon={BookOpen}
+            title="No research videos"
+            body="Backend couldn't fetch videos. Check connectivity to the engine or try refreshing."
+            action={{ label: 'Refresh', onClick: () => load(category, true) }}
+          />
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
             {videos.map(v => (
