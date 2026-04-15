@@ -1,7 +1,9 @@
 'use client'
 
 import { useEffect, useState, useMemo } from 'react'
-import { Search, Copy, Check } from 'lucide-react'
+import { Search, Copy, Check, Activity } from 'lucide-react'
+import StatusBadge from '@/components/StatusBadge'
+import EmptyState from '@/components/EmptyState'
 
 interface Signal {
   id: string
@@ -225,9 +227,9 @@ export default function SignalsPage() {
                       {s.lot_size}
                     </td>
                     <td className="px-4 py-2">
-                      {s.fill?.status === 'FILLED'
-                        ? <span style={{ color: 'var(--bull)' }}>✓ FILLED</span>
-                        : <span style={{ color: 'var(--text-muted)' }}>{s.fill?.status || '—'}</span>}
+                      {s.fill?.status
+                        ? <StatusBadge status={s.fill.status} />
+                        : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                     </td>
                     <td className="px-4 py-2 truncate max-w-xs" style={{ color: 'var(--text-muted)' }}>
                       {s.reason?.slice(0, 70)}
@@ -238,9 +240,12 @@ export default function SignalsPage() {
             </tbody>
           </table>
           {!loading && filtered.length === 0 && (
-            <div className="p-8 text-center text-xs font-mono" style={{ color: 'var(--text-muted)' }}>
-              No signals match your filters
-            </div>
+            <EmptyState
+              icon={Activity}
+              title="No signals found"
+              body={signals.length > 0 ? 'No signals match your current filters.' : 'Agent hasn\'t generated any signals yet. Signals appear after the first cycle.'}
+              compact
+            />
           )}
         </div>
 
@@ -268,8 +273,6 @@ export default function SignalsPage() {
                     color: selected.score >= 0.75 ? 'var(--bull)' : selected.score >= 0.6 ? 'var(--accent)' : 'var(--bear)' },
                   { k: 'Lot Size',   v: String(selected.lot_size) },
                   { k: 'Fill Price', v: selected.fill?.fill_price?.toFixed(5) || '—' },
-                  { k: 'Status',     v: selected.fill?.status || '—',
-                    color: selected.fill?.status === 'FILLED' ? 'var(--bull)' : 'var(--text-muted)' },
                 ].map(({ k, v, color, bold }) => (
                   <div key={k} className="p-2 rounded"
                        style={{ background: 'var(--bg-elevated)' }}>
@@ -280,6 +283,13 @@ export default function SignalsPage() {
                     </div>
                   </div>
                 ))}
+                {/* Status badge as its own cell */}
+                <div className="p-2 rounded" style={{ background: 'var(--bg-elevated)' }}>
+                  <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Status</div>
+                  {selected.fill?.status
+                    ? <StatusBadge status={selected.fill.status} />
+                    : <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>—</span>}
+                </div>
               </div>
 
               {/* Signal ID */}

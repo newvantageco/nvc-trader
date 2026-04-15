@@ -2,6 +2,7 @@
 
 import { useNVCStore } from '@/lib/store'
 import { TrendingUp, TrendingDown, Shield, ShieldOff, Activity } from 'lucide-react'
+import AnimatedNumber from '@/components/AnimatedNumber'
 
 interface MetricCardProps {
   label: string
@@ -108,26 +109,53 @@ export default function HeroMetrics() {
   return (
     <div className="flex gap-3 px-4 py-3 flex-shrink-0">
       {/* Equity */}
-      <MetricCard
-        label="Account Equity"
-        value={`${fmt(equity)} ${currency}`}
-        sub={`Balance ${fmt(balance)}`}
-        icon={<Activity size={15} style={{ color: 'var(--accent)' }} />}
-      />
+      {/* Equity — animated number */}
+      <div
+        className="flex items-center gap-3 px-4 py-3 rounded-lg flex-1 min-w-0"
+        style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
+      >
+        <div className="w-8 h-8 rounded flex items-center justify-center flex-shrink-0"
+             style={{ background: 'var(--bg-elevated)' }}>
+          <Activity size={15} style={{ color: 'var(--accent)' }} />
+        </div>
+        <div className="min-w-0">
+          <div className="section-label mb-0.5">Account Equity</div>
+          <div className="font-mono font-bold text-lg leading-none truncate"
+               style={{ color: 'var(--text-primary)' }}>
+            <AnimatedNumber value={equity} decimals={2} suffix={` ${currency}`} />
+          </div>
+          <div className="font-mono text-[10px] mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>
+            Balance <AnimatedNumber value={balance} decimals={2} />
+          </div>
+        </div>
+      </div>
 
-      {/* Float P&L */}
-      <MetricCard
-        label="Float P&L"
-        value={`${plPositive ? '+' : ''}${fmt(pl)} ${currency}`}
-        sub={`Daily DD ${dd.toFixed(2)}%`}
-        color={plPositive ? 'var(--bull)' : 'var(--bear)'}
-        icon={
-          plPositive
+      {/* Float P&L — animated */}
+      <div
+        className="flex items-center gap-3 px-4 py-3 rounded-lg flex-1 min-w-0"
+        style={{
+          background: plPositive ? 'rgba(46,168,74,0.04)' : 'rgba(229,72,62,0.04)',
+          border: '1px solid var(--border)',
+        }}
+      >
+        <div className="w-8 h-8 rounded flex items-center justify-center flex-shrink-0"
+             style={{ background: 'var(--bg-elevated)' }}>
+          {plPositive
             ? <TrendingUp  size={15} style={{ color: 'var(--bull)' }} />
-            : <TrendingDown size={15} style={{ color: 'var(--bear)' }} />
-        }
-        bg={plPositive ? 'rgba(46,168,74,0.04)' : 'rgba(229,72,62,0.04)'}
-      />
+            : <TrendingDown size={15} style={{ color: 'var(--bear)' }} />}
+        </div>
+        <div className="min-w-0">
+          <div className="section-label mb-0.5">Float P&L</div>
+          <div className="font-mono font-bold text-lg leading-none truncate"
+               style={{ color: plPositive ? 'var(--bull)' : 'var(--bear)' }}>
+            {plPositive ? '+' : ''}
+            <AnimatedNumber value={pl} decimals={2} suffix={` ${currency}`} />
+          </div>
+          <div className="font-mono text-[10px] mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>
+            Daily DD <AnimatedNumber value={dd} decimals={2} suffix="%" />
+          </div>
+        </div>
+      </div>
 
       {/* Circuit Breaker */}
       <MetricCard

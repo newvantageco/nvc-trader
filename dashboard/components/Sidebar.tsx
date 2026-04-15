@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, TrendingUp, BarChart3, Settings,
   Activity, Brain, ShieldCheck, BookOpen,
-  Zap,
+  Zap, Search,
 } from 'lucide-react'
 import { useNVCStore } from '@/lib/store'
 
@@ -29,7 +29,7 @@ function AgentDot() {
 }
 
 // Desktop: 200px sidebar with icon + label
-export function DesktopSidebar() {
+export function DesktopSidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
   const pathname = usePathname()
 
   return (
@@ -105,6 +105,31 @@ export function DesktopSidebar() {
           )
         })}
       </nav>
+
+      {/* Cmd+K search trigger */}
+      {onOpenPalette && (
+        <div className="px-3 mb-3">
+          <button
+            onClick={onOpenPalette}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-xs transition-opacity hover:opacity-80"
+            style={{
+              background:  'var(--bg-elevated)',
+              border:      '1px solid var(--border)',
+              color:       'var(--text-muted)',
+            }}
+            aria-label="Open command palette (⌘K)"
+          >
+            <Search size={11} />
+            <span className="flex-1 text-left font-mono text-[10px]">Search…</span>
+            <kbd
+              className="font-mono rounded"
+              style={{ fontSize: 9, padding: '1px 4px', background: 'var(--bg-base)', border: '1px solid var(--border)' }}
+            >
+              ⌘K
+            </kbd>
+          </button>
+        </div>
+      )}
 
       {/* Agent status footer */}
       <div className="px-5 pb-1">

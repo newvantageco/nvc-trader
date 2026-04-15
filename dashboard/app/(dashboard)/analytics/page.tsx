@@ -1,8 +1,9 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, TrendingUp, Download } from 'lucide-react'
+import { RefreshCw, TrendingUp, Download, Activity, BarChart3 } from 'lucide-react'
 import dynamic from 'next/dynamic'
+import EmptyState from '@/components/EmptyState'
 
 const EquityChart = dynamic(() => import('@/components/EquityChart'), { ssr: false })
 
@@ -293,9 +294,12 @@ export default function AnalyticsPage() {
             </table>
           )}
           {!loading && cycles.length === 0 && (
-            <div className="text-xs py-4" style={{ color: 'var(--text-muted)' }}>
-              No cycles recorded yet — agent runs every 15 minutes.
-            </div>
+            <EmptyState
+              icon={Activity}
+              title="No cycles recorded yet"
+              body="Agent runs every 15 minutes. Cycle data will appear here after the first scheduled run."
+              compact
+            />
           )}
         </div>
       </div>
