@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useMemo } from 'react'
-import { Search, Copy, Check, Activity } from 'lucide-react'
+import { Search, Copy, Check, Activity, ChevronDown, ChevronUp } from 'lucide-react'
 import StatusBadge from '@/components/StatusBadge'
 import EmptyState from '@/components/EmptyState'
 
@@ -64,7 +64,7 @@ function CopyButton({ text }: { text: string }) {
 export default function SignalsPage() {
   const [signals,   setSignals]   = useState<Signal[]>([])
   const [loading,   setLoading]   = useState(true)
-  const [selected,  setSelected]  = useState<Signal | null>(null)
+  const [expanded,  setExpanded]  = useState<Set<string>>(new Set())
   const [search,    setSearch]    = useState('')
   const [dirFilter, setDirFilter] = useState<'ALL' | 'BUY' | 'SELL'>('ALL')
   const [symFilter, setSymFilter] = useState('ALL')
@@ -176,9 +176,8 @@ export default function SignalsPage() {
         ))}
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Signal table */}
-        <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto">
+        <div>
           <table className="w-full text-xs font-mono">
             <thead className="sticky top-0 z-10" style={{ background: 'var(--bg-base)' }}>
               <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-muted)' }}>
@@ -194,48 +193,99 @@ export default function SignalsPage() {
             <tbody>
               {loading
                 ? [...Array(10)].map((_, i) => <SkeletonRow key={i} />)
-                : filtered.map(s => (
-                  <tr
-                    key={s.id}
-                    onClick={() => setSelected(prev => prev?.id === s.id ? null : s)}
-                    className="cursor-pointer border-b hover:bg-opacity-50 transition-colors"
-                    style={{
-                      borderColor: 'var(--border)',
-                      background: selected?.id === s.id ? 'var(--bg-elevated)' : 'transparent',
-                    }}
-                  >
-                    <td className="px-4 py-2" style={{ color: 'var(--text-muted)' }}>
-                      {s.created_at?.slice(11, 19)}
-                      <span className="ml-1 text-xs opacity-50">{s.created_at?.slice(0, 10)}</span>
-                    </td>
-                    <td className="px-4 py-2 font-semibold" style={{ color: 'var(--text-primary)' }}>
-                      {s.instrument}
-                    </td>
-                    <td className="px-4 py-2">
-                      <span className="px-1.5 py-0.5 rounded text-xs font-bold"
-                            style={{
-                              background: s.direction === 'BUY' ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
-                              color: s.direction === 'BUY' ? 'var(--bull)' : 'var(--bear)',
-                            }}>
-                        {s.direction}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2">
-                      <ScoreBar score={s.score} />
-                    </td>
-                    <td className="px-4 py-2 text-right" style={{ color: 'var(--text-secondary)' }}>
-                      {s.lot_size}
-                    </td>
-                    <td className="px-4 py-2">
-                      {s.fill?.status
-                        ? <StatusBadge status={s.fill.status} />
-                        : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                    </td>
-                    <td className="px-4 py-2 truncate max-w-xs" style={{ color: 'var(--text-muted)' }}>
-                      {s.reason?.slice(0, 70)}
-                    </td>
-                  </tr>
-                ))
+                : filtered.map(s => {
+                  const isOpen = expanded.has(s.id)
+                  const toggle = () => setExpanded(prev => {
+                    const next = new Set(prev)
+                    isOpen ? next.delete(s.id) : next.add(s.id)
+                    return next
+                  })
+                  return (
+                    <>
+                      <tr
+                        key={s.id}
+                        onClick={toggle}
+                        className="cursor-pointer border-b hover:bg-opacity-50 transition-colors"
+                        style={{
+                          borderColor: 'var(--border)',
+                          background:  isOpen ? 'var(--bg-elevated)' : 'transparent',
+                        }}
+                      >
+                        <td className="px-4 py-2" style={{ color: 'var(--text-muted)' }}>
+                          {s.created_at?.slice(11, 19)}
+                          <span className="ml-1 text-xs opacity-50">{s.created_at?.slice(0, 10)}</span>
+                        </td>
+                        <td className="px-4 py-2 font-semibold" style={{ color: 'var(--text-primary)' }}>
+                          {s.instrument}
+                        </td>
+                        <td className="px-4 py-2">
+                          <span className="px-1.5 py-0.5 rounded text-xs font-bold"
+                                style={{
+                                  background: s.direction === 'BUY' ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
+                                  color: s.direction === 'BUY' ? 'var(--bull)' : 'var(--bear)',
+                                }}>
+                            {s.direction}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2">
+                          <ScoreBar score={s.score} />
+                        </td>
+                        <td className="px-4 py-2 text-right" style={{ color: 'var(--text-secondary)' }}>
+                          {s.lot_size}
+                        </td>
+                        <td className="px-4 py-2">
+                          {s.fill?.status
+                            ? <StatusBadge status={s.fill.status} />
+                            : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                        </td>
+                        <td className="px-4 py-2 truncate max-w-xs" style={{ color: 'var(--text-muted)' }}>
+                          <span className="flex items-center gap-1.5">
+                            <span className="truncate">{s.reason?.slice(0, 60)}{s.reason && s.reason.length > 60 ? '…' : ''}</span>
+                            {isOpen
+                              ? <ChevronUp size={11} className="flex-shrink-0" style={{ color: 'var(--accent)' }} />
+                              : <ChevronDown size={11} className="flex-shrink-0" style={{ color: 'var(--text-muted)' }} />}
+                          </span>
+                        </td>
+                      </tr>
+
+                      {/* Expanded reasoning row */}
+                      {isOpen && (
+                        <tr key={`${s.id}-exp`} style={{ background: 'var(--bg-elevated)' }}>
+                          <td colSpan={7} className="px-6 pb-4 pt-2">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-[10px] font-semibold tracking-wider uppercase"
+                                    style={{ color: 'var(--text-muted)' }}>
+                                Claude Reasoning · {s.instrument} · {s.created_at?.slice(0,19).replace('T',' ')} UTC
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>
+                                  Score: {(s.score * 100).toFixed(1)}% · Lots: {s.lot_size}
+                                  {s.fill?.fill_price ? ` · Fill: ${s.fill.fill_price.toFixed(5)}` : ''}
+                                </span>
+                                {s.reason && <CopyButton text={s.reason} />}
+                              </div>
+                            </div>
+                            <pre
+                              className="text-xs leading-relaxed p-3 rounded overflow-auto"
+                              style={{
+                                background:  'var(--bg-base)',
+                                color:       'var(--text-secondary)',
+                                border:      '1px solid var(--border)',
+                                borderLeft:  '2px solid var(--accent)',
+                                fontFamily:  'var(--font-mono)',
+                                whiteSpace:  'pre-wrap',
+                                wordBreak:   'break-word',
+                                maxHeight:   240,
+                              }}
+                            >
+                              {s.reason || 'No reasoning logged for this signal.'}
+                            </pre>
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  )
+                })
               }
             </tbody>
           </table>
@@ -248,95 +298,6 @@ export default function SignalsPage() {
             />
           )}
         </div>
-
-        {/* Detail panel */}
-        {selected && (
-          <div className="w-88 flex-shrink-0 border-l overflow-auto"
-               style={{ borderColor: 'var(--border)', background: 'var(--bg-surface)', width: 340 }}>
-            <div className="px-4 py-3 border-b flex items-center justify-between sticky top-0"
-                 style={{ borderColor: 'var(--border)', background: 'var(--bg-surface)' }}>
-              <span className="text-xs font-semibold tracking-wider uppercase"
-                    style={{ color: 'var(--text-secondary)' }}>Signal Detail</span>
-              <button onClick={() => setSelected(null)}
-                      style={{ color: 'var(--text-muted)' }}
-                      className="hover:opacity-70 transition-opacity">✕</button>
-            </div>
-
-            <div className="p-4 flex flex-col gap-4">
-              {/* Key metrics */}
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  { k: 'Instrument', v: selected.instrument, bold: true },
-                  { k: 'Direction',  v: selected.direction,
-                    color: selected.direction === 'BUY' ? 'var(--bull)' : 'var(--bear)' },
-                  { k: 'Score',      v: `${(selected.score * 100).toFixed(1)}%`,
-                    color: selected.score >= 0.75 ? 'var(--bull)' : selected.score >= 0.6 ? 'var(--accent)' : 'var(--bear)' },
-                  { k: 'Lot Size',   v: String(selected.lot_size) },
-                  { k: 'Fill Price', v: selected.fill?.fill_price?.toFixed(5) || '—' },
-                ].map(({ k, v, color, bold }) => (
-                  <div key={k} className="p-2 rounded"
-                       style={{ background: 'var(--bg-elevated)' }}>
-                    <div className="text-xs mb-0.5" style={{ color: 'var(--text-muted)' }}>{k}</div>
-                    <div className="text-xs font-mono font-semibold"
-                         style={{ color: color || (bold ? 'var(--text-primary)' : 'var(--text-secondary)') }}>
-                      {v}
-                    </div>
-                  </div>
-                ))}
-                {/* Status badge as its own cell */}
-                <div className="p-2 rounded" style={{ background: 'var(--bg-elevated)' }}>
-                  <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Status</div>
-                  {selected.fill?.status
-                    ? <StatusBadge status={selected.fill.status} />
-                    : <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>—</span>}
-                </div>
-              </div>
-
-              {/* Signal ID */}
-              <div>
-                <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Signal ID</div>
-                <div className="flex items-center gap-1.5">
-                  <code className="text-xs font-mono truncate" style={{ color: 'var(--text-muted)' }}>
-                    {selected.signal_id || selected.id}
-                  </code>
-                  <CopyButton text={selected.signal_id || selected.id} />
-                </div>
-              </div>
-
-              {/* Time */}
-              <div>
-                <div className="text-xs mb-0.5" style={{ color: 'var(--text-muted)' }}>Generated at</div>
-                <div className="text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>
-                  {selected.created_at?.replace('T', ' ').slice(0, 19)} UTC
-                </div>
-              </div>
-
-              {/* Reasoning */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="text-xs font-semibold tracking-wider uppercase"
-                       style={{ color: 'var(--text-muted)' }}>Claude Reasoning</div>
-                  {selected.reason && <CopyButton text={selected.reason} />}
-                </div>
-                <pre
-                  className="text-xs leading-relaxed p-3 rounded overflow-auto"
-                  style={{
-                    background:  'var(--bg-elevated)',
-                    color:       'var(--text-secondary)',
-                    border:      '1px solid var(--border)',
-                    borderLeft:  '2px solid var(--accent)',
-                    fontFamily:  'var(--font-mono)',
-                    whiteSpace:  'pre-wrap',
-                    wordBreak:   'break-word',
-                    maxHeight:   280,
-                  }}
-                >
-                  {selected.reason || 'No reasoning logged for this signal.'}
-                </pre>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   )
