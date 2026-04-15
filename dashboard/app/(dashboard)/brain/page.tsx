@@ -56,7 +56,8 @@ interface TradeBlock {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+// SSE streaming — uses EventSource directly (not lib/api.ts fetch wrapper)
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'https://nvc-trader.fly.dev'
 
 let _uid = 0
 const uid = () => `${Date.now()}-${++_uid}`
